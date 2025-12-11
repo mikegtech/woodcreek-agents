@@ -1,0 +1,21 @@
+version: "3"
+dotenv: [.env]
+
+vars:
+  PACKAGE_IMPORT_NAME: dataops
+  PYTHON_VERSION: "3.13"
+
+tasks:
+  pin-python:
+    desc: Ensure UV will use Python {{.PYTHON_VERSION}}
+    cmds:
+      # Tell UV to pick Python 3.13 for this workspace
+      - uv python pin {{.PYTHON_VERSION}}
+
+  create-venv:
+    desc: (Re)create the .venv with Python {{.PYTHON_VERSION}}
+    cmds:
+      # blow away any old venv and make a fresh one
+      - rm -rf .venv
+      - uv venv .venv
+      - source ./.venv/bin/activate
