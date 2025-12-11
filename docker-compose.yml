@@ -1,0 +1,186 @@
+
+# Woodcreek Agents Infrastructure Stack
+# Network: models_web (external, shared with traefik/vLLM)
+
+services:
+  # =============================================================================
+  # MILVUS - GPU-Accelerated Vector Database
+  # =============================================================================
+  
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    container_name: milvus-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - models_web
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: milvus-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+
+    command: minio server /data --console-address ":9001"
+    ports:
+      - "9002:9000"   # API (9000 conflicts with portainer)
+      - "9001:9001"   # Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - models_web
+
+  milvus:
+    image: milvusdb/milvus:v2.5.2-gpu
+    container_name: milvus
+    restart: unless-stopped
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: milvus-bucket
+      KNOWHERE_GPU_MEM_POOL_SIZE: "4096"
+    volumes:
+      - milvus_data:/var/lib/milvus
+      # NO milvus.yaml mount - use defaults
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    command: ["milvus", "run", "standalone"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - models_web
+
+  # =============================================================================
+  # POSTGRESQL - LangGraph Checkpoints & App State
+  # =============================================================================
+  
+  postgres:
+    image: postgres:16-alpine
+    container_name: woodcreek-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: woodcreek
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: woodcreek_agents
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U woodcreek -d woodcreek_agents"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - models_web
+
+  # =============================================================================
+  # DCGM EXPORTER - GPU Metrics for Grafana Cloud
+  # =============================================================================
+  
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.8-3.6.0-ubuntu22.04
+    container_name: dcgm-exporter
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "9400:9400"  # Prometheus metrics endpoint
+    cap_add:
+      - SYS_ADMIN
+    networks:
+      - models_web
+
+  # =============================================================================
+  # GRAFANA ALLOY - Metrics/Logs/Traces to Grafana Cloud
+  # =============================================================================
+  # Replaces standalone prometheus for scraping, ships to Grafana Cloud
+  # You may already have promtail running - Alloy can replace it or work alongside
+  
+  alloy:
+    image: grafana/alloy:v1.4.2
+    container_name: grafana-alloy
+    restart: unless-stopped
+    volumes:
+      - ./infra/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+    ports:
+      - "12345:12345"  # Alloy UI
+      - "4317:4317"    # OTLP gRPC (for OpenTelemetry from FastAPI)
+      - "4318:4318"    # OTLP HTTP
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+    environment:
+      - GRAFANA_CLOUD_API_KEY=${GRAFANA_CLOUD_API_KEY}
+    networks:
+      - models_web
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  etcd_data:
+    driver: local
+  minio_data:
+    driver: local
+  milvus_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+
+networks:
+  models_web:
+    external: true
