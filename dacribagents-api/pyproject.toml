@@ -1,28 +1,50 @@
 [project]
 name = "dacribagents"
 version = "0.1.0"
-description = "Add your description here"
+description = "Woodcreek Home Agentic AI System - Multi-agent orchestration for home management"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
+
 dependencies = [
+    # === API Framework ===
     "fastapi[standard]>=0.115.8",
+    "httpx>=0.27.0",
+    # === LangChain / LangGraph Core ===
     "langchain-core>=0.3.34",
-    "langchain-groq>=0.2.4",
-    "langchain-mongodb>=0.4.0",
-    "langgraph>=0.2.70",
-    "langgraph-checkpoint-mongodb>=0.1.0",
-    "opik>=1.4.11",
-    "pre-commit>=4.1.0",
-    "pydantic-settings>=2.7.1",
-    "pymongo>=4.9.2",
-    "loguru>=0.7.3",
-    "langchain-huggingface>=0.1.2",
     "langchain-community>=0.3.17",
-    "wikipedia>=1.4.0",
-    "ipykernel>=6.29.5",
+    "langchain-huggingface>=0.1.2",
+    "langgraph>=0.2.70",
+    # === NVIDIA Ecosystem (Cert-Aligned) ===
+    "langchain-nvidia-ai-endpoints>=0.3.0",
+    "nemoguardrails>=0.11.0",
+    # === Vector Database ===
+    "pymilvus>=2.4.0",
+    "sentence-transformers>=3.0.0",
+    # === State Persistence ===
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "asyncpg>=0.29.0",
+    # === Observability ===
+    "langsmith>=0.1.0",
+    "honeyhive>=0.2.57",
+    "opentelemetry-api>=1.25.0",
+    "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-exporter-otlp>=1.25.0",
+    # === Evaluation (Cert-Aligned) ===
+    "ragas>=0.1.0",
+    # === Structured Outputs ===
+    "instructor>=1.0.0",
     "pydantic>=2.10.6",
-    "datasketch>=1.6.5",
+    "pydantic-settings>=2.7.1",
+    # === Utilities ===
+    "loguru>=0.7.3",
+    "python-dotenv>=1.0.0",
+    # === Development ===
+    "ipykernel>=6.29.5",
+    "pre-commit>=4.1.0",
+    "psycopg-binary>=3.3.2",
+    "langchain-openai>=1.1.1",
 ]
 
 [dependency-groups]
@@ -31,9 +53,11 @@ dev = [
     "ruff>=0.9.6",
     "pytest>=8.3.5",
     "pytest-cov",
+    "pytest-asyncio>=0.23.0",
     "pyyaml>=6.0.2",
     "poethepoet>=0.33.1",
     "pre-commit>=4.2.0",
+    "respx>=0.21.0",          # Mock httpx for testing
 ]
 
 [build-system]
@@ -43,48 +67,44 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/dacribagents"]
 
-# https://github.com/astral-sh/ruff?tab=readme-ov-file#configuration
+# === Ruff Configuration ===
 [tool.ruff]
 line-length = 119
 
-# https://docs.astral.sh/ruff/rules/
 [tool.ruff.lint]
 extend-select = [
-    # pycodestyle errors
-    "E",
-    # flake8-bugbear
-    "B",
-    # pylint equivalent rules
-    "PL",
-    # isort
-    "I",
-    # pydocstyle for docstrings
-    "D",
-    # pep8-naming
-    "N",
+    "E",     # pycodestyle errors
+    "B",     # flake8-bugbear
+    "PL",    # pylint equivalent rules
+    "I",     # isort
+    "D",     # pydocstyle for docstrings
+    "N",     # pep8-naming
+    "ASYNC", # flake8-async (important for asyncio code)
 ]
 
 ignore = [
-    "D107", # Missing docstring in `__init__`
-    "E501", # Line too long
-    "D100", # Missing docstring in public module
-    "D104", # Missing docstring in public package
-    "D103", # Missing docstring in public function
-    "D101", # Missing docstring in public class
-    "D401", # First line of docstring should be in imperative mood
-    # Magic value used in comparison, consider replacing `4` with a constant variable -- Is problem for tests
-    "PLR2004",
-    # `with` statement variable `tmp_dir` overwritten by assignment target, eg: tests/unit_tests/components/metaflow_project/test__metaflow_project_.py:17:9
-    "PLW2901",
+    "D107",    # Missing docstring in `__init__`
+    "E501",    # Line too long
+    "D100",    # Missing docstring in public module
+    "D104",    # Missing docstring in public package
+    "D103",    # Missing docstring in public function
+    "D101",    # Missing docstring in public class
+    "D401",    # First line of docstring should be in imperative mood
+    "PLR2004", # Magic value used in comparison
+    "PLW2901", # `with` statement variable overwritten
 ]
 
-# https://docs.astral.sh/ruff/rules/#mccabe-c90
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+# === Pytest Configuration ===
 [tool.pytest.ini_options]
-markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring external services",
+]
 pythonpath = ["."]
+asyncio_mode = "auto"
 norecursedirs = [
     "src/dacribagents/samples/python_tests",
     "example-project",
@@ -99,6 +119,7 @@ addopts = [
     "--cov-report=term",
 ]
 
+# === Coverage Configuration ===
 [tool.coverage.paths]
 source = ["src/"]
 
@@ -122,9 +143,6 @@ exclude_also = [
 omit = ["tests/artifacts/*"]
 show_missing = true
 
-# Had to disable branch coverage because it was causing errors while generating coverage reports
-# DataError: Can't combine statement coverage data with branch data
-# DISABLING `branch=false` didn't make any difference
 [tool.coverage.run]
 branch = true
 parallel = true
@@ -139,30 +157,36 @@ directory = "test-reports/htmlcov"
 [tool.coverage.json]
 output = "test-reports/coverage.json"
 
+# === Poe Tasks ===
 [tool.poe]
 executor.type = "uv"
 
 [tool.poe.tasks.lint]
 cmd = "uvx --from pre-commit pre-commit run --all-files"
-help = "Run linting, formatting, projen synth, and other static code quality tools"
+help = "Run linting, formatting, and static code quality tools"
 
 [tool.poe.tasks.test]
 cmd = "pytest"
 help = "Run all tests with optional additional arguments"
 
+[tool.poe.tasks.test-fast]
+cmd = "pytest -m 'not slow and not integration'"
+help = "Run fast unit tests only"
 
 [tool.poe.tasks.serve-coverage-report]
 help = "Serve the coverage report on http://localhost:3333"
 shell = """
 echo "Serving coverage report on http://localhost:3333"
 echo "Press Ctrl+C to stop the server"
-
 python -m http.server 3333 --directory ./test-reports/htmlcov
 """
 
+[tool.poe.tasks.dev]
+cmd = "fastapi dev src/dacribagents/api/main.py --port 8090"
+help = "Run FastAPI development server with hot reload"
 
 [tool.poe.tasks.clean]
-help = "Remove all files generated by tests, builds, or operating this codebase"
+help = "Remove all generated files"
 shell = """
 rm -rf dist build coverage.xml test-reports sample/ tests/artifacts/
 
