@@ -1,0 +1,9 @@
+# Wrangler config files (contain secrets)
+wrangler.toml
+wrangler.*.toml
+
+# Node
+node_modules/
+
+# Wrangler
+.wrangler/
