@@ -620,6 +620,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "ragas" },
     { name = "sentence-transformers" },
+    { name = "tenacity" },
 ]
 
 [package.dev-dependencies]
@@ -665,6 +666,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ragas", specifier = ">=0.1.0" },
     { name = "sentence-transformers", specifier = ">=3.0.0" },
+    { name = "tenacity", specifier = ">=9.1.2" },
 ]
 
 [package.metadata.requires-dev]
