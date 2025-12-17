@@ -1,15 +1,94 @@
-
-# Woodcreek Agents Infrastructure Stack
-# Network: models_web (external, shared with traefik/vLLM)
-
 services:
+  # =============================================================================
+  # TRAEFIK - Reverse Proxy for woodcreek.ai
+  # =============================================================================
+  
+  traefik:
+    image: traefik:v3.2
+    container_name: woodcreek-traefik
+    restart: unless-stopped
+    environment:
+      - CF_API_EMAIL=${CF_API_EMAIL}
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    ports:
+      - "8880:80"
+      - "8443:443"
+      - "8881:8080"  # Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - traefik_certs:/letsencrypt
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.woodcreek.ai`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=cloudflare"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+    networks:
+      - woodcreek_net
+
+  # =============================================================================
+  # CLOUDFLARED - Tunnel to Cloudflare
+  # =============================================================================
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: woodcreek-cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - traefik
+    networks:
+      - woodcreek_net
+
+  # =============================================================================
+  # WOODCREEK AGENTS API
+  # =============================================================================
+  
+  agents-api:
+    build:
+      context: ./dacribagents-api
+      dockerfile: Dockerfile
+    container_name: woodcreek-agents-api
+    restart: unless-stopped
+    environment:
+      LLM_PROVIDER: local
+      VLLM_BASE_URL: http://100.71.224.45:8000/v1
+      VLLM_MODEL_NAME: gpt-oss-20b
+      MILVUS_HOST: woodcreek-milvus
+      MILVUS_PORT: 19530
+      POSTGRES_HOST: woodcreek-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: woodcreek
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: woodcreek_agents
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.agents-api.rule=Host(`api.woodcreek.ai`)"
+      - "traefik.http.routers.agents-api.entrypoints=websecure"
+      - "traefik.http.routers.agents-api.tls.certresolver=cloudflare"
+      - "traefik.http.services.agents-api.loadbalancer.server.port=8080"
+    depends_on:
+      milvus:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - woodcreek_net
+
   # =============================================================================
   # MILVUS - GPU-Accelerated Vector Database
   # =============================================================================
   
   etcd:
     image: quay.io/coreos/etcd:v3.5.16
-    container_name: milvus-etcd
+    container_name: woodcreek-etcd
     restart: unless-stopped
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -25,33 +104,32 @@ services:
       timeout: 20s
       retries: 3
     networks:
-      - models_web
+      - woodcreek_net
 
   minio:
     image: minio/minio:RELEASE.2024-11-07T00-52-20Z
-    container_name: milvus-minio
+    container_name: woodcreek-minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
-
     command: minio server /data --console-address ":9001"
     ports:
-      - "9002:9000"   # API (9000 conflicts with portainer)
-      - "9001:9001"   # Console
+      - "9102:9000"
+      - "9101:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
     networks:
-      - models_web
+      - woodcreek_net
 
   milvus:
     image: milvusdb/milvus:v2.5.2-gpu
-    container_name: milvus
+    container_name: woodcreek-milvus
     restart: unless-stopped
     depends_on:
       etcd:
@@ -59,19 +137,18 @@ services:
       minio:
         condition: service_healthy
     environment:
-      ETCD_ENDPOINTS: milvus-etcd:2379
-      MINIO_ADDRESS: milvus-minio:9000
-      MINIO_ACCESS_KEY_ID: minioadmin
+      ETCD_ENDPOINTS: woodcreek-etcd:2379
+      MINIO_ADDRESS: woodcreek-minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: "false"
-      MINIO_BUCKET_NAME: milvus-bucket
+      MINIO_BUCKET_NAME: woodcreek-milvus
       KNOWHERE_GPU_MEM_POOL_SIZE: "4096"
     volumes:
       - milvus_data:/var/lib/milvus
-      # NO milvus.yaml mount - use defaults
     ports:
-      - "19530:19530"
-      - "9091:9091"
+      - "19531:19530"
+      - "9191:9091"
     command: ["milvus", "run", "standalone"]
     deploy:
       resources:
@@ -87,7 +164,7 @@ services:
       retries: 5
       start_period: 90s
     networks:
-      - models_web
+      - woodcreek_net
 
   # =============================================================================
   # POSTGRESQL - LangGraph Checkpoints & App State
@@ -104,83 +181,23 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U woodcreek -d woodcreek_agents"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - models_web
-
-  # =============================================================================
-  # DCGM EXPORTER - GPU Metrics for Grafana Cloud
-  # =============================================================================
-  
-  dcgm-exporter:
-    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.8-3.6.0-ubuntu22.04
-    container_name: dcgm-exporter
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    ports:
-      - "9400:9400"  # Prometheus metrics endpoint
-    cap_add:
-      - SYS_ADMIN
-    networks:
-      - models_web
-
-  # =============================================================================
-  # GRAFANA ALLOY - Metrics/Logs/Traces to Grafana Cloud
-  # =============================================================================
-  # Replaces standalone prometheus for scraping, ships to Grafana Cloud
-  # You may already have promtail running - Alloy can replace it or work alongside
-  
-  alloy:
-    image: grafana/alloy:v1.4.2
-    container_name: grafana-alloy
-    restart: unless-stopped
-    volumes:
-      - ./infra/alloy-config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/log:/var/log:ro
-    ports:
-      - "12345:12345"  # Alloy UI
-      - "4317:4317"    # OTLP gRPC (for OpenTelemetry from FastAPI)
-      - "4318:4318"    # OTLP HTTP
-    command:
-      - run
-      - /etc/alloy/config.alloy
-      - --storage.path=/var/lib/alloy/data
-      - --server.http.listen-addr=0.0.0.0:12345
-    environment:
-      - GRAFANA_CLOUD_API_KEY=${GRAFANA_CLOUD_API_KEY}
-    networks:
-      - models_web
-
-# =============================================================================
-# VOLUMES
-# =============================================================================
+      - woodcreek_net
 
 volumes:
+  traefik_certs:
   etcd_data:
-    driver: local
   minio_data:
-    driver: local
   milvus_data:
-    driver: local
   postgres_data:
-    driver: local
-
-# =============================================================================
-# NETWORKS
-# =============================================================================
 
 networks:
-  models_web:
-    external: true
+  woodcreek_net:
+    name: woodcreek_net
+    driver: bridge
