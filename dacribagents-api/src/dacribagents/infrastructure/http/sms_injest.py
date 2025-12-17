@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import json
+import logging
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 from typing import List, Literal, Optional
 
+logger = logging.getLogger("sms_ingest")
+
 router = APIRouter()
+
 
 class InboundSmsEvent(BaseModel):
     provider: Literal["telnyx"]
@@ -18,11 +23,13 @@ class InboundSmsEvent(BaseModel):
     messaging_profile_id: Optional[str] = None
     organization_id: Optional[str] = None
 
+
 class BatchPayload(BaseModel):
     source: Literal["cloudflare-queue"]
     env: str
     received_at: str
     events: List[InboundSmsEvent]
+
 
 @router.post("/internal/sms/events")
 def ingest_sms_events(
@@ -33,8 +40,19 @@ def ingest_sms_events(
     if not expected or x_sms_ingest_secret != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # For now: log and return. You will wire to SQLite + Milvus + LangGraph later.
-    # Keep it fast; batch size is small.
+    # 🔹 Structured logging (safe, explicit)
+    logger.info(
+        "Inbound SMS batch received",
+        extra={
+            "source": payload.source,
+            "env": payload.env,
+            "received_at": payload.received_at,
+            "event_count": len(payload.events),
+            "events": [e.dict() for e in payload.events],
+        },
+    )
+
+    # 🔹 Always acknowledge success (queue consumer expects 2xx)
     return {
         "status": "accepted",
         "count": len(payload.events),
