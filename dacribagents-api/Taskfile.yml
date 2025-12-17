@@ -19,3 +19,13 @@ tasks:
       - rm -rf .venv
       - uv venv .venv
       - source ./.venv/bin/activate
+
+  email:ingest:
+    desc: "One-shot WorkMail IMAP ingest (INBOX only)"
+    cmds:
+      - uv run python -m dacribagents.cli.ingest_once
+
+  email:worker:
+    desc: "Run WorkMail IMAP ingestion worker loop"
+    cmds:
+      - uv run python -m dacribagents.cli.worker
