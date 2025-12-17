@@ -70,7 +70,10 @@ def create_app() -> FastAPI:
 
     # Register routes
     from dacribagents.api.routes import router
+    from dacribagents.infrastructure.http.sms_ingest import router as sms_router
+
     app.include_router(router)
+    app.include_router(sms_router)
 
     return app
 
