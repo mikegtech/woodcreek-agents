@@ -1,0 +1,19 @@
+http:
+  routers:
+    agents-api:
+      rule: "Host(`api.woodcreek.ai`)"
+      entryPoints:
+        - web
+      service: agents-api
+
+    traefik-dashboard:
+      rule: "Host(`traefik.woodcreek.ai`)"
+      entryPoints:
+        - web
+      service: api@internal
+
+  services:
+    agents-api:
+      loadBalancer:
+        servers:
+          - url: "http://woodcreek-agents-api:8080"
