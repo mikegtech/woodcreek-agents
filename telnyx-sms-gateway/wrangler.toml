@@ -1,0 +1,26 @@
+name = "telnyx-sms-gateway"
+main = "src/webhook.ts"
+compatibility_date = "2025-12-17"
+
+# You will deploy two workers: webhook and consumer.
+# For the consumer worker, run with: wrangler deploy src/consumer.ts --name telnyx-sms-consumer
+
+[vars]
+ENV = "dev"
+# Send to your agent container endpoint (Traefik/Cloudflare Tunnel target)
+AGENT_INGEST_URL = "https://webhooks.woodcreek.ai/internal/sms/events"
+# Shared secret header expected by your agent endpoint
+AGENT_INGEST_SECRET = "REPLACE_ME"
+# Telnyx public key (base64, as provided by Telnyx)
+TELNYX_PUBLIC_KEY_BASE64 = "REPLACE_ME"
+
+[[queues.producers]]
+queue = "sms-events"
+binding = "SMS_EVENTS_QUEUE"
+
+[[queues.consumers]]
+queue = "sms-events"
+max_batch_size = 10
+max_batch_timeout = 5
+# This consumer section applies to the worker that has the queue() handler
+# (the consumer worker file below).
