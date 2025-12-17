@@ -16,6 +16,19 @@ export default {
     async fetch(req: Request, env: Env): Promise<Response> {
         if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
+        const url = new URL(req.url);
+
+        // ACK-only failover endpoint (no signature required)
+        if (url.pathname.endsWith("/fallback")) {
+        const body = await req.text().catch(() => "");
+        console.warn("TELNYX FAILOVER HIT", { path: url.pathname, bodyPreview: body.slice(0, 200) });
+
+        return new Response(JSON.stringify({ status: "acknowledged", mode: "failover" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+        });
+        }
+
         // IMPORTANT: read raw body once and keep it exactly for signature verification
         const rawBody = await req.text();
 

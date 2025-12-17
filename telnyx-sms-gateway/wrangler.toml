@@ -8,11 +8,11 @@ compatibility_date = "2025-12-17"
 [vars]
 ENV = "dev"
 # Send to your agent container endpoint (Traefik/Cloudflare Tunnel target)
-AGENT_INGEST_URL = "https://webhooks.woodcreek.ai/internal/sms/events"
-# Shared secret header expected by your agent endpoint
-AGENT_INGEST_SECRET = "REPLACE_ME"
-# Telnyx public key (base64, as provided by Telnyx)
-TELNYX_PUBLIC_KEY_BASE64 = "REPLACE_ME"
+AGENT_INGEST_URL = "https://webhooks.woodcreek.ai/telnyx/sms/events"
+
+# IMPORTANT: Set these secrets using wrangler CLI instead of hardcoding:
+#   wrangler secret put AGENT_INGEST_SECRET
+#   wrangler secret put TELNYX_PUBLIC_KEY_BASE64
 
 [[queues.producers]]
 queue = "sms-events"

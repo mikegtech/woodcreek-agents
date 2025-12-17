@@ -3,5 +3,15 @@
     "private": true,
     "devDependencies": {
         "wrangler": "^4.0.0"
+    },
+    "scripts": {
+        "deploy:webhook": "npx wrangler deploy src/webhook.ts --name telnyx-sms-webhook",
+        "deploy:consumer": "npx wrangler deploy src/consumer.ts --name telnyx-sms-consumer",
+        "deploy": "npm run deploy:webhook && npm run deploy:consumer",
+        "queue:create": "npx wrangler queues create sms-events",
+        "secrets:webhook": "npx wrangler secret put TELNYX_PUBLIC_KEY_BASE64 --name telnyx-sms-webhook && npx wrangler secret put AGENT_INGEST_SECRET --name telnyx-sms-webhook",
+        "secrets:consumer": "npx wrangler secret put AGENT_INGEST_SECRET --name telnyx-sms-consumer && npx wrangler secret put AGENT_INGEST_URL --name telnyx-sms-consumer",
+        "secrets": "npm run secrets:webhook && npm run secrets:consumer",
+        "setup": "npm run queue:create && npm run deploy && npm run secrets"
     }
 }

@@ -1,0 +1,13 @@
+name = "telnyx-sms-consumer"
+main = "src/consumer.ts"
+compatibility_date = "2025-12-17"
+
+[vars]
+ENV = "dev"
+AGENT_INGEST_URL = "https://webhooks.woodcreek.ai/telnyx/sms/events"
+AGENT_INGEST_SECRET = "bf0416488ecdebb2a63e58acf0c1950476287b5cd3cd1ac8c33598570e15a5e1"
+
+[[queues.consumers]]
+queue = "sms-events"
+max_batch_size = 10
+max_batch_timeout = 5
