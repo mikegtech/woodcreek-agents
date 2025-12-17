@@ -1,0 +1,7 @@
+{
+    "name": "telnyx-sms-gateway",
+    "private": true,
+    "devDependencies": {
+        "wrangler": "^4.0.0"
+    }
+}
