@@ -2,25 +2,33 @@ from __future__ import annotations
 from email import policy
 from email.parser import BytesParser
 from datetime import datetime, timezone
+from typing import Optional
+
 from dacribagents.domain.entities.email_message import EmailMessage
+from dacribagents.domain.entities.attachment import AttachmentRef
+
 
 def _as_text(msg) -> str:
     # Prefer text/plain; fallback to stripped HTML
     if msg.is_multipart():
-        parts = msg.walk()
-        for p in parts:
-            ctype = p.get_content_type()
-            if ctype == "text/plain":
+        for p in msg.walk():
+            if p.get_content_type() == "text/plain":
                 return p.get_content().strip()
         for p in msg.walk():
             if p.get_content_type() == "text/html":
-                html = p.get_content()
-                return html  # normalize later (html->text) if you want
+                return p.get_content()  # normalize later if needed
     else:
         return msg.get_content().strip()
     return ""
 
-def rfc822_to_email_message(provider: str, account: str, folder: str, rfc822_bytes: bytes) -> EmailMessage:
+
+def rfc822_to_email_message(
+    provider: str,
+    account: str,
+    folder: str,
+    rfc822_bytes: bytes,
+    attachments: Optional[list[AttachmentRef]] = None,
+) -> EmailMessage:
     em = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
 
     message_id = (em.get("Message-Id") or "").strip()
@@ -29,7 +37,6 @@ def rfc822_to_email_message(provider: str, account: str, folder: str, rfc822_byt
     to = [x.strip() for x in (em.get_all("To") or [])]
     cc = [x.strip() for x in (em.get_all("Cc") or [])]
 
-    # Date parsing can be messy; default to now if absent/unparseable
     dt = em.get("Date")
     try:
         date = dt.datetime if dt else datetime.now(timezone.utc)
@@ -37,9 +44,7 @@ def rfc822_to_email_message(provider: str, account: str, folder: str, rfc822_byt
         date = datetime.now(timezone.utc)
 
     text = _as_text(em)
-
-    # Optional thread hints (not guaranteed via IMAP)
-    thread_id = (em.get("Thread-Index") or em.get("In-Reply-To") or None)
+    thread_id = em.get("Thread-Index") or em.get("In-Reply-To") or None
 
     return EmailMessage(
         provider=provider,
@@ -54,4 +59,5 @@ def rfc822_to_email_message(provider: str, account: str, folder: str, rfc822_byt
         date=date,
         text=text,
         metadata={"content_type": em.get_content_type()},
+        attachments=attachments or [],
     )
