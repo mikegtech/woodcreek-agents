@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Mapping, Optional
+from dacribagents.domain.entities.attachment import AttachmentRef
 
 @dataclass(frozen=True)
 class EmailMessage:
@@ -17,3 +18,4 @@ class EmailMessage:
     date: datetime
     text: str
     metadata: Mapping[str, str]  # any extra normalized fields
+    attachments: list[AttachmentRef]

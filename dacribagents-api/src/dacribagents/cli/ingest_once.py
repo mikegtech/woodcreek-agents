@@ -7,10 +7,10 @@ from dacribagents.infrastructure.email.providers.workmail_imap.client import (
     WorkMailImapConfig,
     WorkMailImapEmailSource,
 )
+from dacribagents.infrastructure import get_milvus_client
+from dacribagents.infrastructure.stores import MilvusEmailStore, MilvusCheckpointStore
+from dacribagents.infrastructure.embeddings import EmbeddingsFactory
 
-from dacribagents.infrastructure import (
-    get_milvus_client
-)
 
 def main() -> int:
     cfg = WorkMailImapConfig(
@@ -23,9 +23,10 @@ def main() -> int:
     source = WorkMailImapEmailSource(cfg)
 
     milvus = get_milvus_client()
+    milvus.connect()
+
     store = MilvusEmailStore(milvus)
     checkpoints = MilvusCheckpointStore(milvus)
-
     embedder = EmbeddingsFactory.from_env()
 
     uc = IngestEmailUseCase(
