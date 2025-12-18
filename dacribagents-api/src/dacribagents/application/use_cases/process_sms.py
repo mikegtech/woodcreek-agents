@@ -5,7 +5,7 @@ from __future__ import annotations
 from loguru import logger
 
 from dacribagents.infrastructure.sqlite.client import SQLiteClient, get_sqlite_client
-from dacribagents.infrastructure.sms.provider.telnyx import TelnyxProvider, get_telnyx_provider
+from dacribagents.infrastructure.sms.providers.telnyx import TelnyxProvider, get_telnyx_provider
 
 
 class ProcessSMSUseCase:
