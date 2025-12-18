@@ -48,6 +48,8 @@ services:
       dockerfile: Dockerfile
     container_name: woodcreek-agents-api
     restart: unless-stopped
+    volumes:
+      - sqlite_data:/app/data
     environment:
       LLM_PROVIDER: local
       VLLM_BASE_URL: http://100.71.224.45:8000/v1
@@ -61,6 +63,8 @@ services:
       POSTGRES_DB: woodcreek_agents
       ENVIRONMENT: production
       LOG_LEVEL: INFO
+      TELNYX_API_KEY: ${TELNYX_API_KEY}
+      SMS_INGEST_SECRET: ${SMS_INGEST_SECRET}      
     depends_on:
       milvus:
         condition: service_healthy
@@ -183,6 +187,7 @@ volumes:
   minio_data:
   milvus_data:
   postgres_data:
+  sqlite_data:
 
 networks:
   woodcreek_net:
