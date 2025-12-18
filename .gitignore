@@ -1,5 +1,8 @@
 **/.DS_Store
 
+# Traefik ACME certificates
+infra/traefik/acme.json
+
 example-project
 test-reports
 tests/artifacts
@@ -181,3 +184,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+**acme.json
