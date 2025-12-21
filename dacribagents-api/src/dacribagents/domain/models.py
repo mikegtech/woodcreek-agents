@@ -12,6 +12,7 @@ class AgentType(str, Enum):
     """Types of agents in the system."""
 
     HOA_COMPLIANCE = "hoa_compliance"
+    SOLAR = "solar"
     HOME_MAINTENANCE = "home_maintenance"
     SECURITY_CAMERAS = "security_cameras"
     SUPERVISOR = "supervisor"

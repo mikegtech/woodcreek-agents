@@ -16,19 +16,19 @@
 ## Phase 3: Infrastructure
 - [x] Milvus (GPU-accelerated vectors)
 - [x] PostgreSQL (LangGraph checkpoints)
-- [ ] Docker containerization
-- [ ] Traefik routing (woodcreek.ai)
-- [ ] Cloudflare tunnel
+- [x] Docker containerization
+- [x] Traefik routing (woodcreek.ai)
+- [x] Cloudflare tunnel
 
 ## Phase 4: Email Integration
-- [ ] IMAP/SMTP client for woodcreek.me
-- [ ] Email ingestion pipeline → Milvus
-- [ ] Email send capability (notifications, reports)
-- [ ] Email RAG (search HOA communications, receipts, etc.)
+- [x] IMAP/SMTP client for woodcreek.me
+- [x] Email ingestion pipeline → Milvus
+- [x] Email send capability (notifications, reports)
+- [x] Email RAG (search HOA communications, receipts, etc.)
 
 ## Phase 5: SMS/Messaging (Telnyx)
-- [ ] Telnyx account setup
-- [ ] Inbound SMS webhook
+- [x] Telnyx account setup
+- [x] Inbound SMS webhook
 - [ ] Outbound SMS (alerts, reminders)
 - [ ] Two-way conversation threading
 - [ ] SMS → Agent routing

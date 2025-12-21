@@ -7,7 +7,10 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from dacribagents.application.agents import get_general_assistant
+from dacribagents.application.agents import (
+    get_general_assistant,
+    get_supervisor,
+)
 from dacribagents.domain import AgentType, Message, MessageRole
 from dacribagents.infrastructure import (
     get_milvus_client,
@@ -34,8 +37,9 @@ class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
 
     messages: list[ChatMessage] = Field(..., description="Conversation messages")
-    agent_type: str | None = Field(None, description="Specific agent to use (optional)")
+    agent_type: str | None = Field(None, description="Specific agent to use (optional, bypasses routing)")
     thread_id: str | None = Field(None, description="Conversation thread ID for continuity")
+    use_routing: bool = Field(True, description="Use supervisor routing (default: True)")
 
 
 class ChatResponse(BaseModel):
@@ -43,6 +47,7 @@ class ChatResponse(BaseModel):
 
     message: ChatMessage
     agent_type: str
+    routed_by: str | None = None
     thread_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -129,7 +134,7 @@ async def liveness_check() -> dict[str, str]:
 
 
 # ============================================================================
-# Chat Endpoint
+# Chat Endpoint with Supervisor Routing
 # ============================================================================
 
 
@@ -138,8 +143,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """
     Send a message and get a response from an agent.
 
-    If no agent_type is specified, uses the General Assistant.
-    Future: Supervisor agent will route to specialized agents.
+    Routing behavior:
+    - If use_routing=True (default): Supervisor classifies intent and routes to appropriate agent
+    - If use_routing=False or agent_type is specified: Uses the specified agent directly
     """
     try:
         # Convert request messages to domain messages
@@ -151,23 +157,63 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 role = MessageRole.USER
             messages.append(Message(role=role, content=msg.content))
 
-        # For now, always use General Assistant
-        # TODO: Implement routing via Supervisor agent
-        agent = get_general_assistant()
+        # Determine which agent to use
+        if request.agent_type and not request.use_routing:
+            # Direct agent access (bypass routing)
+            try:
+                agent_type = AgentType(request.agent_type)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid agent_type: {request.agent_type}. "
+                           f"Valid types: {[a.value for a in AgentType]}",
+                )
 
-        logger.info(f"Processing chat with {len(messages)} messages using {agent.agent_type.value}")
-        logger.info(f"LLM config: {agent.model_info}")
+            # Get the specific agent
+            if agent_type == AgentType.GENERAL_ASSISTANT:
+                from dacribagents.application.agents import get_general_assistant
+                agent = get_general_assistant()
+            elif agent_type == AgentType.HOA_COMPLIANCE:
+                from dacribagents.application.agents import get_hoa_agent
+                agent = get_hoa_agent()
+            elif agent_type == AgentType.SOLAR:
+                from dacribagents.application.agents import get_solar_agent
+                agent = get_solar_agent()
+            else:
+                agent = get_general_assistant()
 
-        # Process the messages
-        response = await agent.process(messages)
+            logger.info(f"Direct agent access: {agent_type.value}")
+            response = await agent.process(messages)
 
-        return ChatResponse(
-            message=ChatMessage(role=response.role.value, content=response.content),
-            agent_type=agent.agent_type.value,
-            thread_id=request.thread_id,
-            metadata=agent.model_info,
-        )
+            return ChatResponse(
+                message=ChatMessage(role=response.role.value, content=response.content),
+                agent_type=agent.agent_type.value,
+                routed_by=None,
+                thread_id=request.thread_id,
+                metadata=getattr(agent, "model_info", {}),
+            )
 
+        else:
+            # Use Supervisor routing
+            supervisor = get_supervisor()
+
+            logger.info(f"Routing request through Supervisor")
+            logger.info(f"Available agents: {supervisor.registered_agents}")
+
+            response = await supervisor.process(messages)
+
+            handled_by = response.metadata.get("handled_by", "unknown")
+
+            return ChatResponse(
+                message=ChatMessage(role=response.role.value, content=response.content),
+                agent_type=handled_by,
+                routed_by="supervisor",
+                thread_id=request.thread_id,
+                metadata={"routed": True, "handled_by": handled_by},
+            )
+
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.error(f"Validation error in chat: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -195,7 +241,13 @@ async def list_agents() -> list[AgentInfo]:
             name="HOA Compliance",
             type=AgentType.HOA_COMPLIANCE.value,
             description="Expert on HOA rules, CC&Rs, and compliance requirements",
-            capabilities=["rule_lookup", "violation_check", "appeal_drafting"],
+            capabilities=["rule_lookup", "violation_check", "approval_process", "townsq_help"],
+        ),
+        AgentInfo(
+            name="Solar Installation",
+            type=AgentType.SOLAR.value,
+            description="Expert on solar panel installation, permits, and energy systems",
+            capabilities=["installation_status", "permit_info", "energy_monitoring", "financing"],
         ),
         AgentInfo(
             name="Home Maintenance",
@@ -216,6 +268,16 @@ async def list_agents() -> list[AgentInfo]:
             capabilities=["intent_classification", "routing", "delegation"],
         ),
     ]
+
+
+@router.get("/agents/registered", tags=["agents"])
+async def list_registered_agents() -> dict[str, Any]:
+    """List currently registered and active agents."""
+    supervisor = get_supervisor()
+    return {
+        "registered_agents": supervisor.registered_agents,
+        "count": len(supervisor.registered_agents),
+    }
 
 
 @router.get("/config", tags=["config"])

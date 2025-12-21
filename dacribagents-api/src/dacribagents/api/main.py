@@ -15,6 +15,7 @@ from dacribagents.infrastructure import (
 )
 
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
@@ -71,9 +72,11 @@ def create_app() -> FastAPI:
     # Register routes
     from dacribagents.api.routes import router
     from dacribagents.infrastructure.http.sms_ingest import router as sms_router
+    from dacribagents.infrastructure.http.search import router as search_router
 
     app.include_router(router)
     app.include_router(sms_router)
+    app.include_router(search_router)
 
     return app
 
