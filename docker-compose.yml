@@ -183,6 +183,67 @@ services:
   # =============================================================================
   # EMAIL WORKER - Multi-Mailbox Email Ingestion Service
   # =============================================================================
+  email-worker:
+    build:
+      context: ./dacribagents-api
+      dockerfile: Dockerfile
+    container_name: woodcreek-email-worker
+    restart: unless-stopped
+    command: python -m dacribagents.cli.email_worker_lattice
+    environment:
+      # Kafka (Confluent Cloud) - for publishing to Lattice
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME}
+      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD}
+      KAFKA_TOPIC_RAW: lattice.mail.raw.v1
+      
+      # Lattice tenant
+      LATTICE_TENANT_ID: woodcreek
+      
+      # Polling configuration
+      EMAIL_POLL_MINUTES: ${EMAIL_POLL_MINUTES:-5}
+      
+      # Mailbox list
+      WORKMAIL_MAILBOXES: agents,solar,hoa
+      
+      # Agents mailbox
+      WORKMAIL_AGENTS_EMAIL: ${WORKMAIL_AGENTS_EMAIL}
+      WORKMAIL_AGENTS_PASSWORD: ${WORKMAIL_AGENTS_PASSWORD}
+      WORKMAIL_AGENTS_EMAIL_ALIAS: agents@woodcreek.me
+      WORKMAIL_AGENTS_ACCOUNT_ID: workmail-agents
+      WORKMAIL_AGENTS_FOLDER: INBOX
+      WORKMAIL_AGENTS_TARGET_FOLDER: agents
+      
+      # Solar mailbox
+      WORKMAIL_SOLAR_EMAIL: ${WORKMAIL_SOLAR_EMAIL}
+      WORKMAIL_SOLAR_PASSWORD: ${WORKMAIL_SOLAR_PASSWORD}
+      WORKMAIL_SOLAR_EMAIL_ALIAS: solar@woodcreek.me
+      WORKMAIL_SOLAR_ACCOUNT_ID: workmail-solar
+      WORKMAIL_SOLAR_FOLDER: INBOX
+      WORKMAIL_SOLAR_TARGET_FOLDER: solar
+      
+      # HOA mailbox
+      WORKMAIL_HOA_EMAIL: ${WORKMAIL_HOA_EMAIL}
+      WORKMAIL_HOA_PASSWORD: ${WORKMAIL_HOA_PASSWORD}
+      WORKMAIL_HOA_EMAIL_ALIAS: hoa@woodcreek.me
+      WORKMAIL_HOA_ACCOUNT_ID: workmail-hoa
+      WORKMAIL_HOA_FOLDER: INBOX
+      WORKMAIL_HOA_TARGET_FOLDER: hoa
+      
+      # Logging
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "email_worker_lattice"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - woodcreek_net
+    # No depends_on needed - we're publishing to external Kafka, not local services
+
+  # ---------------------------------------------------------------------------
+  # Backfill Job (run manually, not continuously)
+  # ---------------------------------------------------------------------------
   email-backfill:
     build:
       context: ./dacribagents-api
