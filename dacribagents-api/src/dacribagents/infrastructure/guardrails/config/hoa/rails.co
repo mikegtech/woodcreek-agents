@@ -1,0 +1,176 @@
+# =============================================================================
+# HOA Compliance Agent - Colang Rails
+# Specialized guardrails for HOA-related queries
+# =============================================================================
+
+# Import base rails
+import core
+import llm
+
+# -----------------------------------------------------------------------------
+# HOA-Specific User Intents
+# -----------------------------------------------------------------------------
+
+define user ask about arc process
+  "how do I submit to ARC"
+  "architectural review committee"
+  "arc approval"
+  "arc submission"
+  "arc application"
+  "modification request"
+  "home modification approval"
+
+define user ask about fence rules
+  "fence requirements"
+  "fence height"
+  "fence material"
+  "can I build a fence"
+  "fence approval"
+  "fence regulations"
+
+define user ask about paint colors
+  "approved paint colors"
+  "exterior paint"
+  "can I paint my house"
+  "color palette"
+  "paint approval"
+
+define user ask about landscaping rules
+  "landscaping requirements"
+  "yard maintenance"
+  "tree removal"
+  "garden rules"
+  "plant restrictions"
+  "grass type"
+
+define user ask about violation
+  "I got a violation"
+  "hoa violation notice"
+  "violation letter"
+  "how to appeal violation"
+  "violation fine"
+  "compliance issue"
+
+define user ask about dues
+  "hoa dues"
+  "hoa fees"
+  "assessment"
+  "when are dues due"
+  "how to pay hoa"
+
+define user ask about parking rules
+  "parking rules"
+  "street parking"
+  "rv parking"
+  "trailer parking"
+  "commercial vehicle"
+  "overnight parking"
+
+define user ask about noise rules
+  "noise restrictions"
+  "quiet hours"
+  "construction hours"
+  "party noise"
+  "barking dog"
+
+define user ask about rental rules
+  "can I rent my house"
+  "rental restrictions"
+  "airbnb allowed"
+  "lease requirements"
+  "tenant rules"
+
+# -----------------------------------------------------------------------------
+# HOA Bot Responses
+# -----------------------------------------------------------------------------
+
+define bot explain arc process
+  "The ARC (Architectural Review Committee) process in Woodcreek works like this:
+
+  1. **Submit Application**: Fill out the ARC request form on TownSq
+  2. **Include Details**: Provide plans, materials, colors, and contractor info
+  3. **Wait for Review**: The committee reviews within 30 days
+  4. **Receive Decision**: You'll get approval, denial, or request for changes
+  
+  Would you like help with a specific modification request?"
+
+define bot explain fence rules
+  "Woodcreek fence rules include:
+
+  • **Height**: Maximum 6 feet for backyard, 4 feet for front yard
+  • **Materials**: Wood, wrought iron, or composite (no chain link)
+  • **Color**: Must match or complement home exterior
+  • **ARC Approval**: Required before installation
+  • **Setback**: Must be on property line or inside
+  
+  Are you planning a fence installation?"
+
+define bot explain violation process
+  "If you've received a violation notice:
+
+  1. **Read Carefully**: Understand the specific violation cited
+  2. **Check Deadline**: Note the compliance deadline
+  3. **Options**:
+     - Correct the violation before the deadline
+     - Submit an appeal if you believe it's in error
+     - Request an extension if needed
+  4. **Document**: Keep photos showing compliance
+  
+  What type of violation did you receive?"
+
+define bot provide hoa contact
+  "For HOA matters, you can reach:
+
+  • **TownSq Portal**: Primary communication method
+  • **Management Company**: [Contact info in your welcome packet]
+  • **Board Meetings**: Usually monthly, check TownSq for schedule
+  
+  Is there a specific issue I can help you address?"
+
+define bot refuse non_hoa_advice
+  "I'm the HOA Compliance specialist, so I focus on community rules and regulations. For other topics, I can connect you with:
+  
+  • **Solar questions** → Solar Agent
+  • **Maintenance issues** → Maintenance Agent
+  • **Security concerns** → Security Agent
+  
+  What HOA topic can I help you with?"
+
+# -----------------------------------------------------------------------------
+# HOA-Specific Flows
+# -----------------------------------------------------------------------------
+
+define flow arc questions
+  user ask about arc process
+  bot explain arc process
+
+define flow fence questions
+  user ask about fence rules
+  bot explain fence rules
+
+define flow violation help
+  user ask about violation
+  bot explain violation process
+
+# -----------------------------------------------------------------------------
+# Topical Rail - Keep on HOA Topics
+# -----------------------------------------------------------------------------
+
+define flow hoa topical rail
+  user ...
+  # Check if the message is HOA-related
+  $is_hoa_topic = execute check_hoa_topic
+  if not $is_hoa_topic
+    bot refuse non_hoa_advice
+    stop
+
+# -----------------------------------------------------------------------------
+# HOA-Specific Guardrails
+# -----------------------------------------------------------------------------
+
+define flow hoa disclaimer
+  """Add disclaimer for legal-adjacent HOA advice"""
+  bot ...
+  $needs_disclaimer = execute check_needs_hoa_disclaimer(bot_message=$last_bot_message)
+  if $needs_disclaimer
+    bot "Note: This is general guidance based on typical HOA rules. For official rulings, please contact the HOA board directly through TownSq."

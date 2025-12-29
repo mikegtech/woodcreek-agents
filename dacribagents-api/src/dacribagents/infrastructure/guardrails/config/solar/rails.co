@@ -1,0 +1,239 @@
+# =============================================================================
+# Solar Agent - Colang Rails
+# Specialized guardrails for solar panel and energy questions
+# =============================================================================
+
+# Import base rails
+import core
+import llm
+
+# -----------------------------------------------------------------------------
+# Solar-Specific User Intents
+# -----------------------------------------------------------------------------
+
+define user ask about solar installation
+  "how to install solar"
+  "solar panel installation"
+  "getting solar panels"
+  "solar setup"
+  "rooftop solar"
+  "ground mount solar"
+
+define user ask about solar providers
+  "solar companies"
+  "best solar provider"
+  "solar installer"
+  "tesla solar"
+  "sunrun"
+  "local solar company"
+  "solar quotes"
+
+define user ask about solar cost
+  "how much does solar cost"
+  "solar pricing"
+  "solar panel prices"
+  "cost of solar installation"
+  "solar financing"
+  "solar lease vs buy"
+
+define user ask about solar savings
+  "how much will I save"
+  "solar roi"
+  "solar payback period"
+  "electricity bill savings"
+  "solar investment return"
+
+define user ask about net metering
+  "net metering"
+  "selling power back"
+  "grid connection"
+  "utility buyback"
+  "oncor net metering"
+  "texas net metering"
+
+define user ask about solar battery
+  "solar battery"
+  "energy storage"
+  "powerwall"
+  "backup battery"
+  "battery storage"
+  "off grid"
+
+define user ask about solar incentives
+  "solar tax credit"
+  "solar rebates"
+  "federal tax credit"
+  "texas solar incentives"
+  "itc credit"
+  "solar incentives"
+
+define user ask about solar maintenance
+  "cleaning solar panels"
+  "solar panel maintenance"
+  "solar warranty"
+  "panel degradation"
+  "solar repair"
+
+define user ask about hoa solar approval
+  "hoa approval for solar"
+  "solar arc submission"
+  "hoa solar rules"
+  "can I install solar"
+  "solar restrictions"
+
+define user ask about solar monitoring
+  "solar monitoring"
+  "track solar production"
+  "solar app"
+  "monitor energy production"
+  "solar dashboard"
+
+# -----------------------------------------------------------------------------
+# Solar Bot Responses
+# -----------------------------------------------------------------------------
+
+define bot explain solar installation
+  "Solar installation in Woodcreek typically involves:
+
+  1. **Site Assessment**: Evaluating roof condition, orientation, and shading
+  2. **System Design**: Sizing based on your energy usage
+  3. **HOA Approval**: Texas law protects solar rights, but ARC notification is courteous
+  4. **Permitting**: City of Fate building permits required
+  5. **Installation**: Usually 1-3 days for residential
+  6. **Inspection**: City and utility inspection
+  7. **Activation**: Oncor meter swap and grid connection
+  
+  Would you like details on any of these steps?"
+
+define bot explain solar costs
+  "Solar costs in Texas typically range:
+
+  • **System Size**: 6-12 kW for most homes ($15,000-$35,000 before incentives)
+  • **Federal Tax Credit**: 30% ITC (reduces cost significantly)
+  • **Financing Options**: Cash, loan, lease, or PPA
+  • **Payback Period**: Usually 6-10 years in Texas
+  
+  Factors affecting your cost:
+  - Roof complexity and condition
+  - System size needed
+  - Equipment quality (panels, inverter)
+  - Installation company
+  
+  Would you like help estimating for your home?"
+
+define bot explain net metering texas
+  "Net metering in Texas (specifically with Oncor):
+
+  ⚠️ **Important**: Texas doesn't have mandatory net metering, but many REPs offer buyback programs.
+
+  • **Buyback Rates**: Usually lower than retail rates (wholesale or avoided cost)
+  • **Best REPs for Solar**: Green Mountain, Chariot, Rhythm
+  • **Meter Type**: Bidirectional meter from Oncor (no cost)
+  • **Monthly True-Up**: Credits applied to your bill
+  
+  I recommend getting quotes from multiple REPs for the best buyback rates.
+  
+  Which REP are you currently with?"
+
+define bot explain solar incentives
+  "Current solar incentives for Woodcreek homeowners:
+
+  **Federal**:
+  • 30% Investment Tax Credit (ITC) - through 2032
+  • Reduces your federal tax liability
+
+  **State/Local**:
+  • Texas: No state income tax, so no state credit
+  • Property Tax Exemption: Solar doesn't increase property tax
+  • No sales tax on solar equipment
+
+  **Utility**:
+  • Some REPs offer installation rebates
+  • Buyback programs for excess generation
+
+  Total savings can be 30-40% off installation cost!
+  
+  Would you like help calculating your potential savings?"
+
+define bot explain hoa solar texas
+  "Great news! Texas has strong solar access laws:
+
+  **Texas Property Code § 202.010**:
+  • HOAs CANNOT prohibit solar panels
+  • Can only regulate placement for aesthetics
+  • Cannot increase cost by more than 10%
+  • Cannot decrease efficiency by more than 10%
+
+  **Woodcreek Process**:
+  1. Submit ARC notification (not approval request)
+  2. Provide system design and placement
+  3. HOA has 30 days to respond with aesthetic concerns only
+  
+  You have the legal right to install solar! Would you like help with the notification?"
+
+define bot refuse non_solar_topic
+  "I'm the Solar specialist, so I focus on solar panels, energy storage, and related topics. For other questions, I can connect you with:
+  
+  • **HOA rules** → HOA Compliance Agent
+  • **Home repairs** → Maintenance Agent
+  • **Security systems** → Security Agent
+  
+  What solar topic can I help you with?"
+
+# -----------------------------------------------------------------------------
+# Solar-Specific Flows
+# -----------------------------------------------------------------------------
+
+define flow solar installation questions
+  user ask about solar installation
+  bot explain solar installation
+
+define flow solar cost questions
+  user ask about solar cost
+  bot explain solar costs
+
+define flow net metering questions
+  user ask about net metering
+  bot explain net metering texas
+
+define flow solar incentives questions
+  user ask about solar incentives
+  bot explain solar incentives
+
+define flow hoa solar questions
+  user ask about hoa solar approval
+  bot explain hoa solar texas
+
+# -----------------------------------------------------------------------------
+# Topical Rail - Keep on Solar Topics
+# -----------------------------------------------------------------------------
+
+define flow solar topical rail
+  user ...
+  $is_solar_topic = execute check_solar_topic
+  if not $is_solar_topic
+    bot refuse non_solar_topic
+    stop
+
+# -----------------------------------------------------------------------------
+# Solar-Specific Guardrails
+# -----------------------------------------------------------------------------
+
+define flow solar financial disclaimer
+  """Add disclaimer for financial/ROI advice"""
+  bot ...
+  $mentions_money = execute check_mentions_financial(bot_message=$last_bot_message)
+  if $mentions_money
+    bot "Disclaimer: These are estimates based on typical values. Actual costs and savings depend on your specific situation, energy usage, and chosen provider. Get multiple quotes for accurate pricing."
+
+define flow solar safety warning
+  """Warn about DIY solar dangers"""
+  user "can I install solar myself"
+  bot "⚠️ **Safety Warning**: Solar installation involves high-voltage electrical work and rooftop safety risks. While Texas allows DIY, I strongly recommend licensed professionals for:
+  
+  • Electrical safety and code compliance
+  • Roof integrity and waterproofing
+  • Permit and inspection requirements
+  • Warranty protection
+  
+  Would you like recommendations for qualified installers in the Fate area?"

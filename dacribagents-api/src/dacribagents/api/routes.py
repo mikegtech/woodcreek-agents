@@ -1,4 +1,8 @@
-"""API routes for the Woodcreek Agents service."""
+"""
+API routes for the Woodcreek Agents service.
+
+Updated with NeMo Guardrails integration for safe, on-topic conversations.
+"""
 
 from datetime import datetime, timezone
 from typing import Any
@@ -7,10 +11,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from dacribagents.application.agents import (
-    get_general_assistant,
-    get_supervisor,
-)
+from dacribagents.application.agents import get_general_assistant
 from dacribagents.domain import AgentType, Message, MessageRole
 from dacribagents.infrastructure import (
     get_milvus_client,
@@ -37,9 +38,9 @@ class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
 
     messages: list[ChatMessage] = Field(..., description="Conversation messages")
-    agent_type: str | None = Field(None, description="Specific agent to use (optional, bypasses routing)")
+    agent_type: str | None = Field(None, description="Specific agent to use (optional)")
     thread_id: str | None = Field(None, description="Conversation thread ID for continuity")
-    use_routing: bool = Field(True, description="Use supervisor routing (default: True)")
+    use_guardrails: bool = Field(True, description="Enable NeMo Guardrails (default: True)")
 
 
 class ChatResponse(BaseModel):
@@ -75,6 +76,68 @@ class AgentInfo(BaseModel):
     type: str
     description: str
     capabilities: list[str]
+
+
+# ============================================================================
+# Guardrails Helper
+# ============================================================================
+
+
+async def check_input_guardrails(message: str) -> tuple[bool, str]:
+    """
+    Check input message against guardrails.
+    
+    Returns:
+        (allowed, reason) - True if allowed, False with reason if blocked
+    """
+    try:
+        from dacribagents.infrastructure.guardrails import GuardrailsMiddleware
+        
+        middleware = GuardrailsMiddleware()
+        return await middleware.check_input(message)
+    except ImportError:
+        logger.warning("Guardrails not available, skipping input check")
+        return True, ""
+    except Exception as e:
+        logger.error(f"Guardrails input check failed: {e}")
+        return True, ""  # Fail open - allow if guardrails error
+
+
+async def check_output_guardrails(message: str) -> tuple[bool, str]:
+    """
+    Check output message against guardrails.
+    
+    Returns:
+        (allowed, filtered_message) - True with original or filtered message
+    """
+    try:
+        from dacribagents.infrastructure.guardrails import GuardrailsMiddleware
+        
+        middleware = GuardrailsMiddleware()
+        return await middleware.check_output(message)
+    except ImportError:
+        logger.warning("Guardrails not available, skipping output check")
+        return True, message
+    except Exception as e:
+        logger.error(f"Guardrails output check failed: {e}")
+        return True, message  # Fail open
+
+
+def get_agent_for_type(agent_type: str | None):
+    """Get the appropriate agent (with or without guardrails)."""
+    try:
+        if agent_type == "hoa" or agent_type == "hoa_compliance":
+            from dacribagents.infrastructure.guardrails import get_guarded_hoa_agent
+            return get_guarded_hoa_agent(), "hoa_compliance"
+        elif agent_type == "solar":
+            from dacribagents.infrastructure.guardrails import get_guarded_solar_agent
+            return get_guarded_solar_agent(), "solar"
+        else:
+            from dacribagents.infrastructure.guardrails import get_guarded_general_assistant
+            return get_guarded_general_assistant(), "general_assistant"
+    except ImportError:
+        logger.warning("Guardrails not available, using unguarded agent")
+        return get_general_assistant(), agent_type or "general_assistant"
 
 
 # ============================================================================
@@ -116,9 +179,17 @@ async def readiness_check() -> ReadinessResponse:
         logger.warning(f"PostgreSQL health check failed: {e}")
         services["postgres"] = f"error: {str(e)[:50]}"
 
+    # Check Guardrails
+    try:
+        from dacribagents.infrastructure.guardrails import GuardrailsMiddleware
+        services["guardrails"] = "available"
+    except ImportError:
+        services["guardrails"] = "not_configured"
+
     # Determine overall status
-    all_healthy = all(v == "healthy" for v in services.values())
-    status = "ready" if all_healthy else "degraded"
+    critical_services = ["milvus", "postgres"]
+    critical_healthy = all(services.get(s) == "healthy" for s in critical_services if s in services)
+    status = "ready" if critical_healthy else "degraded"
 
     return ReadinessResponse(
         status=status,
@@ -134,7 +205,7 @@ async def liveness_check() -> dict[str, str]:
 
 
 # ============================================================================
-# Chat Endpoint with Supervisor Routing
+# Chat Endpoint (with Guardrails)
 # ============================================================================
 
 
@@ -143,11 +214,32 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """
     Send a message and get a response from an agent.
 
-    Routing behavior:
-    - If use_routing=True (default): Supervisor classifies intent and routes to appropriate agent
-    - If use_routing=False or agent_type is specified: Uses the specified agent directly
+    Features:
+    - NeMo Guardrails for input/output safety (enabled by default)
+    - Agent routing based on agent_type
+    - Jailbreak and toxicity prevention
+    - Topic-specific guardrails for HOA and Solar agents
     """
     try:
+        # Get the last user message for guardrails check
+        last_user_message = ""
+        if request.messages:
+            for msg in reversed(request.messages):
+                if msg.role == "user":
+                    last_user_message = msg.content
+                    break
+        
+        # === INPUT GUARDRAILS ===
+        if request.use_guardrails and last_user_message:
+            allowed, reason = await check_input_guardrails(last_user_message)
+            if not allowed:
+                logger.warning(f"Input blocked by guardrails: {reason}")
+                return ChatResponse(
+                    message=ChatMessage(role="assistant", content=reason),
+                    agent_type="guardrails",
+                    metadata={"blocked": True, "reason": "input_guardrails"},
+                )
+        
         # Convert request messages to domain messages
         messages: list[Message] = []
         for msg in request.messages:
@@ -157,63 +249,38 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 role = MessageRole.USER
             messages.append(Message(role=role, content=msg.content))
 
-        # Determine which agent to use
-        if request.agent_type and not request.use_routing:
-            # Direct agent access (bypass routing)
-            try:
-                agent_type = AgentType(request.agent_type)
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid agent_type: {request.agent_type}. "
-                           f"Valid types: {[a.value for a in AgentType]}",
-                )
-
-            # Get the specific agent
-            if agent_type == AgentType.GENERAL_ASSISTANT:
-                from dacribagents.application.agents import get_general_assistant
-                agent = get_general_assistant()
-            elif agent_type == AgentType.HOA_COMPLIANCE:
-                from dacribagents.application.agents import get_hoa_agent
-                agent = get_hoa_agent()
-            elif agent_type == AgentType.SOLAR:
-                from dacribagents.application.agents import get_solar_agent
-                agent = get_solar_agent()
-            else:
-                agent = get_general_assistant()
-
-            logger.info(f"Direct agent access: {agent_type.value}")
-            response = await agent.process(messages)
-
-            return ChatResponse(
-                message=ChatMessage(role=response.role.value, content=response.content),
-                agent_type=agent.agent_type.value,
-                routed_by=None,
-                thread_id=request.thread_id,
-                metadata=getattr(agent, "model_info", {}),
-            )
-
+        # Get appropriate agent (with guardrails if available)
+        if request.use_guardrails:
+            agent, agent_type_str = get_agent_for_type(request.agent_type)
         else:
-            # Use Supervisor routing
-            supervisor = get_supervisor()
+            agent = get_general_assistant()
+            agent_type_str = "general_assistant"
 
-            logger.info(f"Routing request through Supervisor")
-            logger.info(f"Available agents: {supervisor.registered_agents}")
+        logger.info(f"Processing chat with {len(messages)} messages using {agent_type_str}")
+        logger.info(f"Guardrails: {'enabled' if request.use_guardrails else 'disabled'}")
 
-            response = await supervisor.process(messages)
+        # Process the messages
+        response = await agent.process(messages)
 
-            handled_by = response.metadata.get("handled_by", "unknown")
+        # === OUTPUT GUARDRAILS ===
+        response_content = response.content
+        if request.use_guardrails:
+            allowed, filtered_content = await check_output_guardrails(response_content)
+            if not allowed:
+                logger.warning("Output modified by guardrails")
+                response_content = filtered_content
 
-            return ChatResponse(
-                message=ChatMessage(role=response.role.value, content=response.content),
-                agent_type=handled_by,
-                routed_by="supervisor",
-                thread_id=request.thread_id,
-                metadata={"routed": True, "handled_by": handled_by},
-            )
+        # Build metadata
+        metadata = getattr(agent, "model_info", {})
+        metadata["guardrails_enabled"] = request.use_guardrails
 
-    except HTTPException:
-        raise
+        return ChatResponse(
+            message=ChatMessage(role=response.role.value, content=response_content),
+            agent_type=agent_type_str,
+            thread_id=request.thread_id,
+            metadata=metadata,
+        )
+
     except ValueError as e:
         logger.error(f"Validation error in chat: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -234,20 +301,20 @@ async def list_agents() -> list[AgentInfo]:
         AgentInfo(
             name="General Assistant",
             type=AgentType.GENERAL_ASSISTANT.value,
-            description="General purpose assistant for everyday questions and tasks",
-            capabilities=["general_qa", "recommendations", "explanations"],
+            description="General purpose assistant for everyday questions and tasks (with guardrails)",
+            capabilities=["general_qa", "recommendations", "explanations", "routing"],
         ),
         AgentInfo(
             name="HOA Compliance",
             type=AgentType.HOA_COMPLIANCE.value,
-            description="Expert on HOA rules, CC&Rs, and compliance requirements",
-            capabilities=["rule_lookup", "violation_check", "approval_process", "townsq_help"],
+            description="Expert on HOA rules, CC&Rs, and compliance requirements (with guardrails)",
+            capabilities=["rule_lookup", "violation_help", "arc_guidance", "appeal_drafting"],
         ),
         AgentInfo(
-            name="Solar Installation",
-            type=AgentType.SOLAR.value,
-            description="Expert on solar panel installation, permits, and energy systems",
-            capabilities=["installation_status", "permit_info", "energy_monitoring", "financing"],
+            name="Solar Specialist",
+            type="solar",
+            description="Solar panel installation, costs, incentives, and Texas regulations (with guardrails)",
+            capabilities=["cost_estimation", "incentive_info", "hoa_solar_rights", "provider_guidance"],
         ),
         AgentInfo(
             name="Home Maintenance",
@@ -261,33 +328,33 @@ async def list_agents() -> list[AgentInfo]:
             description="Monitors security systems, cameras, and alerts",
             capabilities=["camera_status", "alert_management", "event_history"],
         ),
-        AgentInfo(
-            name="Supervisor",
-            type=AgentType.SUPERVISOR.value,
-            description="Routes requests to the appropriate specialized agent",
-            capabilities=["intent_classification", "routing", "delegation"],
-        ),
     ]
-
-
-@router.get("/agents/registered", tags=["agents"])
-async def list_registered_agents() -> dict[str, Any]:
-    """List currently registered and active agents."""
-    supervisor = get_supervisor()
-    return {
-        "registered_agents": supervisor.registered_agents,
-        "count": len(supervisor.registered_agents),
-    }
 
 
 @router.get("/config", tags=["config"])
 async def get_config() -> dict[str, Any]:
-    """Get current LLM configuration (non-sensitive)."""
+    """Get current LLM and guardrails configuration (non-sensitive)."""
     settings = get_settings()
-    return {
+    
+    config = {
         "llm_provider": settings.llm_provider,
         "vllm_base_url": settings.vllm_base_url if settings.llm_provider == "local" else None,
         "vllm_model_name": settings.vllm_model_name if settings.llm_provider == "local" else None,
         "embedding_model": settings.embedding_model,
         "embedding_dimension": settings.embedding_dimension,
     }
+    
+    # Add guardrails status
+    try:
+        from dacribagents.infrastructure.guardrails import GuardrailedAgent
+        config["guardrails"] = {
+            "available": True,
+            "agents": ["general", "hoa", "solar"],
+        }
+    except ImportError:
+        config["guardrails"] = {
+            "available": False,
+            "reason": "not_installed",
+        }
+    
+    return config
