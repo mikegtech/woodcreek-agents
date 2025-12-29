@@ -180,6 +180,44 @@ services:
       retries: 5
     networks:
       - woodcreek_net
+  # =============================================================================
+  # EMAIL WORKER - Multi-Mailbox Email Ingestion Service
+  # =============================================================================
+  email-backfill:
+    build:
+      context: ./dacribagents-api
+      dockerfile: Dockerfile
+    container_name: woodcreek-email-backfill
+    profiles: ["backfill"]  # Only run when explicitly requested
+    command: >
+      python -m dacribagents.cli.email_worker_lattice_backfill
+      --mailbox ${BACKFILL_MAILBOX:-agents}
+      --folder ${BACKFILL_FOLDER:-INBOX}
+      --limit ${BACKFILL_LIMIT:-100}
+    environment:
+      # Same Kafka config as worker
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME}
+      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD}
+      KAFKA_TOPIC_RAW: lattice.mail.raw.v1
+      LATTICE_TENANT_ID: woodcreek
+      
+      # Mailbox configs (same as worker)
+      WORKMAIL_MAILBOXES: agents,solar,hoa
+      WORKMAIL_AGENTS_EMAIL: ${WORKMAIL_AGENTS_EMAIL}
+      WORKMAIL_AGENTS_PASSWORD: ${WORKMAIL_AGENTS_PASSWORD}
+      WORKMAIL_AGENTS_EMAIL_ALIAS: agents@woodcreek.me
+      WORKMAIL_AGENTS_ACCOUNT_ID: workmail-agents
+      WORKMAIL_SOLAR_EMAIL: ${WORKMAIL_SOLAR_EMAIL}
+      WORKMAIL_SOLAR_PASSWORD: ${WORKMAIL_SOLAR_PASSWORD}
+      WORKMAIL_SOLAR_EMAIL_ALIAS: solar@woodcreek.me
+      WORKMAIL_SOLAR_ACCOUNT_ID: workmail-solar
+      WORKMAIL_HOA_EMAIL: ${WORKMAIL_HOA_EMAIL}
+      WORKMAIL_HOA_PASSWORD: ${WORKMAIL_HOA_PASSWORD}
+      WORKMAIL_HOA_EMAIL_ALIAS: hoa@woodcreek.me
+      WORKMAIL_HOA_ACCOUNT_ID: workmail-hoa
+    networks:
+      - woodcreek_net
 
 volumes:
   traefik_certs:

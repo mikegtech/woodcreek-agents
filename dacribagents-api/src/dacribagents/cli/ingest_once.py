@@ -1,3 +1,5 @@
+"""One-shot email ingestion from WorkMail with recipient filtering."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,6 +20,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Ingest emails from WorkMail")
     parser.add_argument("--reset", action="store_true", help="Reset flags in target folder for reprocessing")
     parser.add_argument("--folder", default=None, help="Override folder to reset (default: account folder)")
+    parser.add_argument("--no-filter", action="store_true", help="Disable recipient filtering (process all emails)")
+    parser.add_argument("--to-only", action="store_true", help="Only match To field, not CC")
     args = parser.parse_args()
 
     cfg = WorkMailImapConfig(
@@ -48,6 +52,15 @@ def main() -> int:
         attachment_store = s3_store_from_env()
 
     max_attachment_mb = float(os.getenv("ATTACHMENTS_MAX_MB", "25"))
+    
+    # Recipient filtering (default: enabled)
+    require_exact_recipient = not args.no_filter
+    if os.getenv("EMAIL_REQUIRE_EXACT_RECIPIENT", "").lower() == "false":
+        require_exact_recipient = False
+    
+    include_cc = not args.to_only
+    if os.getenv("EMAIL_INCLUDE_CC", "").lower() == "false":
+        include_cc = False
 
     uc = IngestEmailUseCase(
         source=source,
@@ -55,8 +68,15 @@ def main() -> int:
         embedder=embedder,
         attachment_store=attachment_store,
         max_attachment_mb=max_attachment_mb,
+        require_exact_recipient=require_exact_recipient,
+        include_cc=include_cc,
     )
 
+    print(f"Ingesting emails for: {cfg.email}")
+    print(f"Recipient filtering: {'enabled' if require_exact_recipient else 'disabled'}")
+    if require_exact_recipient:
+        print(f"Include CC: {'yes' if include_cc else 'no (To only)'}")
+    
     count = uc.run()
     print(f"Ingested {count} emails from {cfg.folder} → {cfg.target_folder}/")
     return 0
