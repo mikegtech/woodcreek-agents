@@ -1,11 +1,57 @@
 # =============================================================================
-# Solar Agent - Colang Rails
+# Solar Agent - Colang Rails (Colang 2.0)
 # Specialized guardrails for solar panel and energy questions
+# Compatible with NeMo Guardrails 0.19+
 # =============================================================================
 
-# Import base rails
+# -----------------------------------------------------------------------------
+# Imports (Colang 2.0)
+# -----------------------------------------------------------------------------
 import core
 import llm
+from guardrails import *
+
+# -----------------------------------------------------------------------------
+# Main Flow - Entry Point (Required for Colang 2.0)
+# -----------------------------------------------------------------------------
+flow main
+    """Main entry point for Solar agent - activates all guardrail flows."""
+    # Activate input safety rails
+    activate check_jailbreak_attempt
+    activate check_toxic_input
+    
+    # Activate Solar-specific conversation flows
+    activate solar_installation_questions
+    activate solar_cost_questions
+    activate solar_provider_questions
+    activate solar_savings_questions
+    activate net_metering_questions
+    activate solar_battery_questions
+    activate solar_incentives_questions
+    activate solar_maintenance_questions
+    activate hoa_solar_questions
+    activate solar_monitoring_questions
+    
+    # Activate safety flows
+    activate solar_diy_safety_warning
+    
+    # Activate topical rail (keep on solar topics)
+    activate solar_topical_rail
+    
+    # Activate financial disclaimer
+    activate solar_financial_disclaimer_flow
+    
+    # Activate the LLM response generation
+    activate llm_continuation
+
+# -----------------------------------------------------------------------------
+# LLM Continuation Flow
+# -----------------------------------------------------------------------------
+flow llm_continuation
+    """Fall back to LLM for unmatched solar inputs."""
+    user said something unexpected
+    $response = await GenerateResponseAction
+    bot say $response
 
 # -----------------------------------------------------------------------------
 # Solar-Specific User Intents
@@ -181,59 +227,101 @@ define bot refuse non_solar_topic
   What solar topic can I help you with?"
 
 # -----------------------------------------------------------------------------
-# Solar-Specific Flows
+# Solar-Specific Flows (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow solar installation questions
-  user ask about solar installation
-  bot explain solar installation
+flow solar_installation_questions
+    """Handle solar installation questions."""
+    user ask about solar installation
+    bot explain solar installation
 
-define flow solar cost questions
-  user ask about solar cost
-  bot explain solar costs
+flow solar_cost_questions
+    """Handle solar cost questions."""
+    user ask about solar cost
+    bot explain solar costs
 
-define flow net metering questions
-  user ask about net metering
-  bot explain net metering texas
+flow solar_provider_questions
+    """Handle solar provider questions."""
+    user ask about solar providers
+    bot say "For solar installation in the Fate/Rockwall area, I recommend getting quotes from multiple providers. Popular options include Tesla Solar, Sunrun, Freedom Solar, and local installers. Look for NABCEP-certified installers with good reviews. Would you like tips on comparing quotes?"
 
-define flow solar incentives questions
-  user ask about solar incentives
-  bot explain solar incentives
+flow solar_savings_questions
+    """Handle solar savings questions."""
+    user ask about solar savings
+    bot say "Solar savings in Texas depend on your electricity usage, system size, and REP buyback rates. Typical homes save $100-200/month. With the 30% federal tax credit, payback is usually 6-10 years. Would you like help estimating your potential savings?"
 
-define flow hoa solar questions
-  user ask about hoa solar approval
-  bot explain hoa solar texas
+flow net_metering_questions
+    """Handle net metering questions."""
+    user ask about net metering
+    bot explain net metering texas
+
+flow solar_battery_questions
+    """Handle solar battery questions."""
+    user ask about solar battery
+    bot say "Battery storage adds $10,000-20,000 to a solar system but provides backup power and can maximize savings. Popular options: Tesla Powerwall, Enphase IQ, and Franklin WholePower. In Texas, batteries are especially useful during grid outages. Want details on battery sizing for your needs?"
+
+flow solar_incentives_questions
+    """Handle solar incentive questions."""
+    user ask about solar incentives
+    bot explain solar incentives
+
+flow solar_maintenance_questions
+    """Handle solar maintenance questions."""
+    user ask about solar maintenance
+    bot say "Solar panels require minimal maintenance. Key tasks: annual inspection, occasional cleaning (rain usually suffices in Texas), monitoring production for drops. Most systems have 25-year warranties on panels, 10-12 years on inverters. Is there a specific maintenance concern?"
+
+flow hoa_solar_questions
+    """Handle HOA solar approval questions."""
+    user ask about hoa solar approval
+    bot explain hoa solar texas
+
+flow solar_monitoring_questions
+    """Handle solar monitoring questions."""
+    user ask about solar monitoring
+    bot say "Most solar systems include monitoring apps that show real-time production, historical data, and alerts. Popular platforms: Tesla app, Enphase Enlighten, SolarEdge monitoring. These help you track performance and catch issues early. Which inverter brand are you considering?"
 
 # -----------------------------------------------------------------------------
-# Topical Rail - Keep on Solar Topics
+# Topical Rail - Keep on Solar Topics (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow solar topical rail
-  user ...
-  $is_solar_topic = execute check_solar_topic
-  if not $is_solar_topic
-    bot refuse non_solar_topic
-    stop
+flow solar_topical_rail
+    """Ensure conversations stay on solar topics."""
+    user said $text
+    $is_solar_topic = await check_solar_topic(user_message=$text)
+    if not $is_solar_topic
+        bot refuse non_solar_topic
 
 # -----------------------------------------------------------------------------
-# Solar-Specific Guardrails
+# Solar Financial Disclaimer (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow solar financial disclaimer
-  """Add disclaimer for financial/ROI advice"""
-  bot ...
-  $mentions_money = execute check_mentions_financial(bot_message=$last_bot_message)
-  if $mentions_money
-    bot "Disclaimer: These are estimates based on typical values. Actual costs and savings depend on your specific situation, energy usage, and chosen provider. Get multiple quotes for accurate pricing."
+flow solar_financial_disclaimer_flow
+    """Add disclaimer for financial estimates."""
+    bot said $text
+    $mentions_money = await check_mentions_financial(bot_message=$text)
+    if $mentions_money
+        bot say "Disclaimer: These are estimates based on typical Texas market values. Actual costs and savings depend on your specific situation. Get multiple quotes for accurate pricing."
 
-define flow solar safety warning
-  """Warn about DIY solar dangers"""
-  user "can I install solar myself"
-  bot "⚠️ **Safety Warning**: Solar installation involves high-voltage electrical work and rooftop safety risks. While Texas allows DIY, I strongly recommend licensed professionals for:
-  
-  • Electrical safety and code compliance
-  • Roof integrity and waterproofing
-  • Permit and inspection requirements
-  • Warranty protection
-  
-  Would you like recommendations for qualified installers in the Fate area?"
+# -----------------------------------------------------------------------------
+# Safety Rails (Colang 2.0)
+# -----------------------------------------------------------------------------
+
+flow check_jailbreak_attempt
+    """Detect and block jailbreak attempts."""
+    user attempt jailbreak
+    bot say "I'm designed to help with solar energy questions within my guidelines. How can I assist you with solar panels?"
+
+flow check_toxic_input
+    """Detect and handle toxic input."""
+    $is_toxic = await check_toxicity
+    if not $is_toxic
+        bot say "Let's keep our conversation respectful. How can I help with your solar question?"
+        abort
+
+flow solar_diy_safety_warning
+    """Warn about DIY solar dangers."""
+    user said "can I install solar myself"
+    bot say "⚠️ Safety Warning: Solar installation involves high-voltage electrical work and rooftop safety risks. While Texas allows DIY, I strongly recommend licensed professionals for electrical safety, code compliance, roof integrity, and warranty protection. Would you like recommendations for qualified installers?"
+    
+    or user said "diy solar"
+    bot say "⚠️ Safety Warning: DIY solar installation carries significant risks including electrical shock, falls, and code violations. Professional installation ensures safety, proper permitting, and valid warranties. Would you like help finding licensed installers in the Fate area?"

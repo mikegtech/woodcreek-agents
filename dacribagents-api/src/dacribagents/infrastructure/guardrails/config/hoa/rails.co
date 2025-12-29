@@ -1,11 +1,53 @@
 # =============================================================================
-# HOA Compliance Agent - Colang Rails
+# HOA Compliance Agent - Colang Rails (Colang 2.0)
 # Specialized guardrails for HOA-related queries
+# Compatible with NeMo Guardrails 0.19+
 # =============================================================================
 
-# Import base rails
+# -----------------------------------------------------------------------------
+# Imports (Colang 2.0)
+# -----------------------------------------------------------------------------
 import core
 import llm
+from guardrails import *
+
+# -----------------------------------------------------------------------------
+# Main Flow - Entry Point (Required for Colang 2.0)
+# -----------------------------------------------------------------------------
+flow main
+    """Main entry point for HOA agent - activates all guardrail flows."""
+    # Activate input safety rails
+    activate check_jailbreak_attempt
+    activate check_toxic_input
+    
+    # Activate HOA-specific conversation flows
+    activate arc_questions
+    activate fence_questions
+    activate violation_help
+    activate paint_questions
+    activate landscaping_questions
+    activate dues_questions
+    activate parking_questions
+    activate noise_questions
+    activate rental_questions
+    
+    # Activate topical rail (keep on HOA topics)
+    activate hoa_topical_rail
+    
+    # Activate disclaimer flow
+    activate hoa_disclaimer_flow
+    
+    # Activate the LLM response generation
+    activate llm_continuation
+
+# -----------------------------------------------------------------------------
+# LLM Continuation Flow
+# -----------------------------------------------------------------------------
+flow llm_continuation
+    """Fall back to LLM for unmatched HOA inputs."""
+    user said something unexpected
+    $response = await GenerateResponseAction
+    bot say $response
 
 # -----------------------------------------------------------------------------
 # HOA-Specific User Intents
@@ -137,40 +179,88 @@ define bot refuse non_hoa_advice
   What HOA topic can I help you with?"
 
 # -----------------------------------------------------------------------------
-# HOA-Specific Flows
+# HOA-Specific Flows (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow arc questions
-  user ask about arc process
-  bot explain arc process
+flow arc_questions
+    """Handle ARC process questions."""
+    user ask about arc process
+    bot explain arc process
 
-define flow fence questions
-  user ask about fence rules
-  bot explain fence rules
+flow fence_questions
+    """Handle fence rule questions."""
+    user ask about fence rules
+    bot explain fence rules
 
-define flow violation help
-  user ask about violation
-  bot explain violation process
+flow violation_help
+    """Help with HOA violations."""
+    user ask about violation
+    bot explain violation process
+
+flow paint_questions
+    """Handle paint color questions."""
+    user ask about paint colors
+    bot say "Woodcreek requires exterior paint colors to be from the approved palette. You can find the approved colors on TownSq or request the list from the ARC. Any color changes require ARC approval before painting. Would you like help submitting a paint request?"
+
+flow landscaping_questions
+    """Handle landscaping questions."""
+    user ask about landscaping rules
+    bot say "Woodcreek has landscaping guidelines covering lawn maintenance, tree removal, and garden installations. Key rules: lawns must be maintained, dead plants replaced within 30 days, and major landscaping changes need ARC approval. What specific landscaping question do you have?"
+
+flow dues_questions
+    """Handle HOA dues questions."""
+    user ask about dues
+    bot say "Woodcreek HOA dues are typically assessed semi-annually. You can view your balance and make payments through TownSq. Late payments may incur fees. Would you like help accessing your account?"
+
+flow parking_questions
+    """Handle parking rule questions."""
+    user ask about parking rules
+    bot say "Woodcreek parking rules: No overnight street parking, RVs/trailers must be stored out of sight, commercial vehicles restricted. Guests may park on the street temporarily. Need details on a specific parking situation?"
+
+flow noise_questions
+    """Handle noise rule questions."""
+    user ask about noise rules
+    bot say "Woodcreek quiet hours are typically 10 PM - 7 AM. Construction work should be limited to daytime hours. Persistent noise issues can be reported through TownSq. Is there a specific noise concern I can help with?"
+
+flow rental_questions
+    """Handle rental rule questions."""
+    user ask about rental rules
+    bot say "Woodcreek allows rentals with some restrictions. Minimum lease terms typically apply (often 12 months), and landlords must provide tenant info to the HOA. Short-term rentals like Airbnb may be restricted. Would you like the specific rental guidelines?"
 
 # -----------------------------------------------------------------------------
-# Topical Rail - Keep on HOA Topics
+# Topical Rail - Keep on HOA Topics (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow hoa topical rail
-  user ...
-  # Check if the message is HOA-related
-  $is_hoa_topic = execute check_hoa_topic
-  if not $is_hoa_topic
-    bot refuse non_hoa_advice
-    stop
+flow hoa_topical_rail
+    """Ensure conversations stay on HOA topics."""
+    user said $text
+    $is_hoa_topic = await check_hoa_topic(user_message=$text)
+    if not $is_hoa_topic
+        bot refuse non_hoa_advice
 
 # -----------------------------------------------------------------------------
-# HOA-Specific Guardrails
+# HOA Disclaimer Flow (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow hoa disclaimer
-  """Add disclaimer for legal-adjacent HOA advice"""
-  bot ...
-  $needs_disclaimer = execute check_needs_hoa_disclaimer(bot_message=$last_bot_message)
-  if $needs_disclaimer
-    bot "Note: This is general guidance based on typical HOA rules. For official rulings, please contact the HOA board directly through TownSq."
+flow hoa_disclaimer_flow
+    """Add disclaimer for legal-adjacent HOA advice."""
+    bot said $text
+    $needs_disclaimer = await check_needs_hoa_disclaimer(bot_message=$text)
+    if $needs_disclaimer
+        bot say "Note: This is general guidance based on typical HOA rules. For official rulings, please contact the HOA board directly through TownSq."
+
+# -----------------------------------------------------------------------------
+# Safety Rails (Colang 2.0)
+# -----------------------------------------------------------------------------
+
+flow check_jailbreak_attempt
+    """Detect and block jailbreak attempts."""
+    user attempt jailbreak
+    bot say "I'm designed to help with HOA questions within my guidelines. How can I assist you with Woodcreek HOA matters?"
+
+flow check_toxic_input
+    """Detect and handle toxic input."""
+    $is_toxic = await check_toxicity
+    if not $is_toxic
+        bot say "Let's keep our conversation respectful. How can I help with your HOA question?"
+        abort

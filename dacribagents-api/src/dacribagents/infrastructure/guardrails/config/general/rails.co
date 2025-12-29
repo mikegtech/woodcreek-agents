@@ -1,7 +1,55 @@
 # =============================================================================
-# General Assistant - Colang Rails
+# General Assistant - Colang Rails (Colang 2.0)
 # Handles general home-related queries with appropriate guardrails
+# Compatible with NeMo Guardrails 0.19+
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Imports (Colang 2.0)
+# -----------------------------------------------------------------------------
+import core
+import llm
+from guardrails import *
+
+# -----------------------------------------------------------------------------
+# Main Flow - Entry Point (Required for Colang 2.0)
+# -----------------------------------------------------------------------------
+flow main
+    """Main entry point - activates all guardrail flows."""
+    # Activate input safety rails
+    activate check_jailbreak_attempt
+    activate check_toxic_input
+    activate check_harmful_request
+    
+    # Activate conversation flows
+    activate greeting
+    activate capabilities
+    activate handle_frustration
+    activate goodbye_flow
+    
+    # Activate routing flows
+    activate route_to_hoa
+    activate route_to_solar
+    activate route_to_maintenance
+    activate route_to_security
+    
+    # Activate blocking flows
+    activate block_politics
+    activate block_medical
+    activate block_legal
+    activate block_financial
+    
+    # Activate the LLM response generation
+    activate llm_continuation
+
+# -----------------------------------------------------------------------------
+# LLM Continuation Flow (handles unmatched inputs)
+# -----------------------------------------------------------------------------
+flow llm_continuation
+    """Fall back to LLM for unmatched user inputs."""
+    user said something unexpected
+    $response = await GenerateResponseAction
+    bot say $response
 
 # -----------------------------------------------------------------------------
 # User Intent Definitions
@@ -197,78 +245,107 @@ define bot refuse harmful
 # Conversation Flows
 # -----------------------------------------------------------------------------
 
-define flow greeting
-  user express greeting
-  bot express greeting
+flow greeting
+    """Handle user greetings."""
+    user express greeting
+    bot express greeting
 
-define flow capabilities
-  user ask about capabilities
-  bot explain capabilities
+flow capabilities
+    """Explain what the assistant can do."""
+    user ask about capabilities
+    bot explain capabilities
 
-define flow route to hoa
-  user ask about hoa
-  bot redirect to hoa agent
+flow route_to_hoa
+    """Route HOA questions to specialist."""
+    user ask about hoa
+    bot redirect to hoa agent
 
-define flow route to solar
-  user ask about solar
-  bot redirect to solar agent
+flow route_to_solar
+    """Route solar questions to specialist."""
+    user ask about solar
+    bot redirect to solar agent
 
-define flow route to maintenance
-  user ask about maintenance
-  bot redirect to maintenance agent
+flow route_to_maintenance
+    """Route maintenance questions to specialist."""
+    user ask about maintenance
+    bot redirect to maintenance agent
 
-define flow route to security
-  user ask about security
-  bot redirect to security agent
+flow route_to_security
+    """Route security questions to specialist."""
+    user ask about security
+    bot redirect to security agent
 
-define flow handle frustration
-  user express frustration
-  bot express empathy
+flow handle_frustration
+    """Handle frustrated users with empathy."""
+    user express frustration
+    bot express empathy
 
-define flow goodbye
-  user say goodbye
-  bot say goodbye
-
-# -----------------------------------------------------------------------------
-# Guardrail Flows (Block inappropriate requests)
-# -----------------------------------------------------------------------------
-
-define flow block politics
-  user ask about politics
-  bot refuse political
-
-define flow block medical
-  user ask about medical advice
-  bot refuse medical advice
-
-define flow block legal
-  user ask about legal advice
-  bot refuse legal advice
-
-define flow block financial
-  user ask about financial advice
-  bot refuse financial advice
-
-define flow block jailbreak
-  user attempt jailbreak
-  bot refuse jailbreak
-
-define flow block harmful
-  user ask for harmful content
-  bot refuse harmful
+flow goodbye_flow
+    """Handle goodbyes."""
+    user say goodbye
+    bot say goodbye
 
 # -----------------------------------------------------------------------------
-# Self-Check Rails
+# Guardrail Flows - Block Inappropriate Requests (Colang 2.0)
 # -----------------------------------------------------------------------------
 
-define flow self check input
-  $allowed = execute self_check_input
-  if not $allowed
+flow block_politics
+    """Block political discussions."""
+    user ask about politics
+    bot refuse political
+
+flow block_medical
+    """Block medical advice requests."""
+    user ask about medical advice
+    bot refuse medical advice
+
+flow block_legal
+    """Block legal advice requests."""
+    user ask about legal advice
+    bot refuse legal advice
+
+flow block_financial
+    """Block financial advice requests."""
+    user ask about financial advice
+    bot refuse financial advice
+
+# -----------------------------------------------------------------------------
+# Safety Rails (Colang 2.0)
+# -----------------------------------------------------------------------------
+
+flow check_jailbreak_attempt
+    """Detect and block jailbreak attempts."""
+    user attempt jailbreak
+    bot refuse jailbreak
+
+flow check_toxic_input
+    """Detect and handle toxic input."""
+    $is_toxic = await check_toxicity
+    if not $is_toxic
+        bot refuse harmful
+        abort
+
+flow check_harmful_request
+    """Block harmful content requests."""
+    user ask for harmful content
     bot refuse harmful
-    stop
 
-define flow self check output
-  $allowed = execute self_check_output
-  if not $allowed
-    bot "I apologize, but I need to rephrase my response. Let me try again with more appropriate information."
-    stop
+# -----------------------------------------------------------------------------
+# Self-Check Rails (Colang 2.0 - using await)
+# -----------------------------------------------------------------------------
+
+flow self_check_input_rail
+    """Check user input before processing."""
+    user said $text
+    $allowed = await self_check_input(user_input=$text)
+    if not $allowed
+        bot refuse harmful
+        abort
+
+flow self_check_output_rail
+    """Check bot output before sending."""
+    bot said $text
+    $allowed = await self_check_output(bot_response=$text)
+    if not $allowed
+        bot say "I apologize, but I need to rephrase my response. Let me try again."
+        abort
