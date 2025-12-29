@@ -68,7 +68,9 @@ class LatticeEnvelope:
                 "version": self.source_version,
             },
             "data_classification": self.data_classification,
-            "pii": self.pii,
+            "pii": {
+                "contains_pii": self.pii,
+            },
             "trace_id": self.trace_id or str(uuid.uuid4()),
             "payload": self.payload,
         }
