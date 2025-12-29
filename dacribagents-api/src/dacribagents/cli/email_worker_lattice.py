@@ -299,12 +299,12 @@ class EmailWorkerLattice:
         logger.info(f"  Recipient filter: {config.email_alias}")
         
         # Create IMAP source
+        # Note: WorkMailImapConfig.target_folder is a computed property from email
         imap_config = WorkMailImapConfig(
             region="us-east-1",
             email=config.email,
             password=config.password,
             folder=config.folder,
-            target_folder=config.target_folder,
         )
         
         source = WorkMailImapEmailSource(imap_config)
@@ -324,8 +324,7 @@ class EmailWorkerLattice:
                     if not self._check_recipient_match(raw.rfc822_bytes, config.email_alias):
                         logger.debug(f"  Skipping UID {uid} - not addressed to {config.email_alias}")
                         skipped += 1
-                        # Still mark as processed to avoid re-checking
-                        source.mark_processed(uid)
+                        # DO NOT mark as processed - let the correct mailbox handler get it
                         continue
                     
                     # Publish to Lattice
@@ -436,15 +435,13 @@ class EmailWorkerLattice:
 # Factory Functions
 # =============================================================================
 
-def create_publisher_from_env() -> LatticeKafkaPublisher:
-    """Create Kafka publisher from environment variables."""
-    return LatticeKafkaPublisher(
-        brokers=os.environ["KAFKA_BROKERS"],
-        username=os.environ["KAFKA_SASL_USERNAME"],
-        password=os.environ["KAFKA_SASL_PASSWORD"],
-        topic=os.getenv("KAFKA_TOPIC_RAW", "lattice.mail.raw.v1"),
-        tenant_id=os.getenv("LATTICE_TENANT_ID", "woodcreek"),
-    )
+def create_publisher_from_env() -> "LatticeKafkaPublisher":
+    """Create Kafka publisher from environment variables.
+    
+    Uses the lattice publisher module which supports claim check pattern.
+    """
+    from dacribagents.infrastructure.lattice.publisher import get_lattice_publisher
+    return get_lattice_publisher()
 
 
 def create_mailboxes_from_env() -> list[MailboxConfig]:
@@ -552,7 +549,8 @@ def backfill():
         import imaplib
         from datetime import timedelta
         
-        conn = source._client
+        # Connect and get the underlying IMAP connection
+        conn = source._connect()  # Use _connect() method to get connection
         conn.select(args.folder, readonly=True)
         
         # Build search criteria
