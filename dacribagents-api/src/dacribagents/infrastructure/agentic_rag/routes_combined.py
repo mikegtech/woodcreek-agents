@@ -52,7 +52,8 @@ class ChatResponse(BaseModel):
 class RAGQueryRequest(BaseModel):
     """Request for RAG query."""
     query: str = Field(..., description="The user's question")
-    collection: str = Field(default="emails", description="Milvus collection to search")
+    collection: str = Field(default="email_chunks_v1", description="Milvus collection to search")
+    filter_expr: str | None = Field(default=None, description="Milvus filter (e.g., 'account_id == \"workmail-hoa\"')")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of documents to retrieve")
     max_iterations: int = Field(default=3, ge=1, le=5, description="Max self-correction iterations")
 
@@ -88,7 +89,8 @@ class QueryAnalysisResponse(BaseModel):
 class DocumentSearchRequest(BaseModel):
     """Request for document search."""
     query: str = Field(..., description="Search query")
-    collection: str = Field(default="emails", description="Collection to search")
+    collection: str = Field(default="email_chunks_v1", description="Collection to search")
+    filter_expr: str | None = Field(default=None, description="Milvus filter expression")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of results")
     min_score: float = Field(default=0.5, ge=0.0, le=1.0, description="Minimum relevance score")
 
@@ -113,6 +115,16 @@ class HealthResponse(BaseModel):
 
 
 router = APIRouter()
+
+# Alias for backward compatibility
+combined_router = router
+
+# Import and include Milvus exploration routes
+try:
+    from dacribagents.infrastructure.agentic_rag.milvus_routes import router as milvus_router
+    # Note: Include this in your main.py: app.include_router(milvus_router)
+except ImportError:
+    milvus_router = None
 
 
 # =============================================================================
@@ -258,13 +270,17 @@ async def chat(request: ChatRequest) -> ChatResponse:
         if agent_type == "hoa":
             if request.use_rag:
                 from dacribagents.infrastructure.agentic_rag import get_agentic_rag
-                rag = get_agentic_rag(collection_name="hoa_documents")
+                rag = get_agentic_rag(
+                    collection_name="email_chunks_v1",
+                    filter_expr='account_id == "workmail-hoa"',
+                )
                 result = await rag.query(user_message)
                 response_text = result.response
                 metadata["rag"] = {
                     "is_grounded": result.is_grounded,
                     "confidence": result.confidence,
                     "iterations": result.iterations,
+                    "filter": 'account_id == "workmail-hoa"',
                 }
             else:
                 from dacribagents.application.agents.hoa_agent import get_hoa_agent
@@ -274,20 +290,25 @@ async def chat(request: ChatRequest) -> ChatResponse:
         elif agent_type == "solar":
             if request.use_rag:
                 from dacribagents.infrastructure.agentic_rag import get_agentic_rag
-                rag = get_agentic_rag(collection_name="solar_documents")
+                # Solar uses same collection but can filter by account if needed
+                rag = get_agentic_rag(
+                    collection_name="email_chunks_v1",
+                    filter_expr='account_id == "workmail-solar"',  # Update if different
+                )
                 result = await rag.query(user_message)
                 response_text = result.response
                 metadata["rag"] = {
                     "is_grounded": result.is_grounded,
                     "confidence": result.confidence,
                     "iterations": result.iterations,
+                    "filter": 'account_id == "workmail-solar"',
                 }
             else:
                 from dacribagents.application.agents.solar_agent import get_solar_agent
                 agent = get_solar_agent()
                 response_text = await agent.chat(user_message)
                 
-        else:  # general
+        else:  # general - searches all documents, no filter
             from dacribagents.application.agents.general_assistant import get_general_assistant
             agent = get_general_assistant()
             response_text = await agent.chat(user_message)
@@ -340,7 +361,7 @@ async def rag_query(request: RAGQueryRequest) -> RAGQueryResponse:
     POST /rag/query
     {
         "query": "What are the fence height limits?",
-        "collection": "emails",
+        "collection": "email_chunks_v1",
         "top_k": 5,
         "max_iterations": 3
     }
@@ -447,7 +468,7 @@ async def search_documents(request: DocumentSearchRequest) -> DocumentSearchResp
     POST /rag/search
     {
         "query": "fence requirements",
-        "collection": "emails",
+        "collection": "email_chunks_v1",
         "top_k": 10,
         "min_score": 0.6
     }

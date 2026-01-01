@@ -75,10 +75,11 @@ class HOAComplianceAgent(BaseAgent):
             try:
                 from dacribagents.infrastructure.agentic_rag import get_agentic_rag
                 self._rag_pipeline = get_agentic_rag(
-                    collection_name="hoa_documents",
+                    collection_name="email_chunks_v1",
+                    filter_expr='account_id == "workmail-hoa"',
                     max_iterations=3,
                 )
-                logger.info("Agentic RAG pipeline loaded for HOA agent")
+                logger.info("Agentic RAG pipeline loaded for HOA agent (filtered by workmail-hoa)")
             except Exception as e:
                 logger.warning(f"Could not load agentic RAG: {e}")
         return self._rag_pipeline

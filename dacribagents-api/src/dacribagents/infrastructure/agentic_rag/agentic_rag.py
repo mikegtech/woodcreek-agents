@@ -200,7 +200,8 @@ class AgenticRAG:
         self,
         llm: BaseChatModel,
         milvus_client: MilvusClientWrapper,
-        collection_name: str = "emails",
+        collection_name: str = "email_chunks_v1",
+        filter_expr: str | None = None,
         max_iterations: int = 3,
         relevance_threshold: float = 0.7,
         grounding_threshold: float = 0.8,
@@ -208,6 +209,7 @@ class AgenticRAG:
         self.llm = llm
         self.milvus = milvus_client
         self.collection_name = collection_name
+        self.filter_expr = filter_expr
         self.max_iterations = max_iterations
         self.relevance_threshold = relevance_threshold
         self.grounding_threshold = grounding_threshold
@@ -215,7 +217,7 @@ class AgenticRAG:
         # Embedding model for queries
         self._embedder = None
         
-        logger.info(f"AgenticRAG initialized with collection={collection_name}")
+        logger.info(f"AgenticRAG initialized with collection={collection_name}, filter={filter_expr}")
     
     @property
     def embedder(self):
@@ -358,7 +360,8 @@ class AgenticRAG:
             query_vector=query_embedding,
             top_k=top_k,
             collection_name=self.collection_name,
-            output_fields=["subject", "sender", "text", "date"],
+            filter_expr=self.filter_expr,
+            output_fields=["subject", "sender", "text", "date", "section_type", "account_id"],
         )
         
         chunks = []
@@ -709,13 +712,19 @@ Comprehensive Answer:"""
 
 
 def get_agentic_rag(
-    collection_name: str = "emails",
+    collection_name: str = "email_chunks_v1",
+    filter_expr: str | None = None,
     max_iterations: int = 3,
 ) -> AgenticRAG:
     """
     Factory function to create AgenticRAG instance.
     
     Uses the configured LLM and Milvus client.
+    
+    Args:
+        collection_name: Milvus collection to search
+        filter_expr: Optional Milvus filter expression (e.g., 'account_id == "workmail-hoa"')
+        max_iterations: Max self-correction iterations
     """
     from dacribagents.application.agents.general_assistant import create_llm
     from dacribagents.infrastructure.milvus_client import get_milvus_client
@@ -729,5 +738,6 @@ def get_agentic_rag(
         llm=llm,
         milvus_client=milvus,
         collection_name=collection_name,
+        filter_expr=filter_expr,
         max_iterations=max_iterations,
     )
