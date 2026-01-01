@@ -54,7 +54,7 @@ services:
       LLM_PROVIDER: local
       VLLM_BASE_URL: http://100.71.224.45:8000/v1
       VLLM_MODEL_NAME: gpt-oss-20b
-      MILVUS_HOST: woodcreek-milvus
+      MILVUS_HOST: 100.103.47.127 # woodcreek-milvus
       MILVUS_PORT: 19530
       POSTGRES_HOST: woodcreek-postgres
       POSTGRES_PORT: 5432

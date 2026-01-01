@@ -28,15 +28,31 @@ INLINE_THRESHOLD_BYTES = 256 * 1024  # 256 KB
 MAX_EMAIL_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
+def format_timestamp(dt: datetime) -> str:
+    """
+    Format datetime to Lattice-compatible ISO8601 with milliseconds and Z suffix.
+
+    Example: 2025-12-30T13:10:56.776Z
+    """
+    # Convert to UTC if needed
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+
+    # Format with milliseconds (3 decimal places) and Z suffix
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
 @dataclass
 class LatticeEnvelope:
     """Lattice Kafka message envelope."""
-    
+
     message_id: str
     schema_version: str = "v1"
     domain: str = "mail"
     stage: str = "raw"
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: format_timestamp(datetime.now(timezone.utc)))
     
     tenant_id: str = ""
     account_id: str = ""
@@ -88,7 +104,7 @@ class ObjectStore:
         bucket: str = "lattice-raw",
     ):
         """Initialize object store.
-        
+
         Args:
             endpoint_url: MinIO endpoint (None for AWS S3)
             access_key: AWS/MinIO access key
@@ -105,7 +121,7 @@ class ObjectStore:
             region_name=region,
             config=Config(signature_version="s3v4"),
         )
-        
+
         # Ensure bucket exists
         self._ensure_bucket()
     
@@ -294,13 +310,15 @@ class LatticeKafkaPublisher:
             logger.warning("No object store configured, inlining payload (may fail for large emails)")
         
         # Build payload matching lattice.mail.raw.v1 schema
+        received_timestamp = format_timestamp(received_at or datetime.now(timezone.utc))
         payload = {
             "provider": "imap",
             "provider_message_id": provider_message_id,
             "email_id": email_id,
             "folder": folder,
-            "received_at": (received_at or datetime.now(timezone.utc)).isoformat(),
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "received_at": received_timestamp,
+            "internal_date": received_timestamp,
+            "fetched_at": format_timestamp(datetime.now(timezone.utc)),
             "size_bytes": size_bytes,
             "content_hash": content_hash,
             "raw_format": "rfc822",

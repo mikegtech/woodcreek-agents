@@ -73,10 +73,16 @@ def create_app() -> FastAPI:
     from dacribagents.api.routes import router
     from dacribagents.infrastructure.http.sms_ingest import router as sms_router
     from dacribagents.infrastructure.http.search import router as search_router
+    from dacribagents.infrastructure.agentic_rag.routes_combined import router as combined_router
+    from dacribagents.infrastructure.agentic_rag.milvus_routes import router as milvus_router
 
+
+    
     app.include_router(router)
     app.include_router(sms_router)
     app.include_router(search_router)
+    app.include_router(combined_router)
+    app.include_router(milvus_router)
 
     return app
 
