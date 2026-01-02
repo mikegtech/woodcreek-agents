@@ -1,5 +1,8 @@
 **/.DS_Store
 
+# DeepLearning.AI certification materials
+docs/Certifications/DeepLearning.AI/
+
 # Traefik ACME certificates
 infra/traefik/acme.json
 
@@ -186,3 +189,4 @@ cython_debug/
 .pypirc
 
 **acme.json
+
