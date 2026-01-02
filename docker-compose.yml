@@ -65,6 +65,7 @@ services:
       LOG_LEVEL: INFO
       TELNYX_API_KEY: ${TELNYX_API_KEY}
       SMS_INGEST_SECRET: ${SMS_INGEST_SECRET}      
+      LATTICE_DATABASE_URL: ${LATTICE_DATABASE_URL}
     depends_on:
       milvus:
         condition: service_healthy

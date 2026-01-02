@@ -353,31 +353,98 @@ class AgenticRAG:
         return chunks
     
     async def _semantic_retrieve(self, query: str, top_k: int) -> list[RetrievedChunk]:
-        """Basic semantic search in Milvus."""
+        """
+        Semantic search in Milvus, then hydrate content from Postgres.
+        
+        Architecture: Claim Check Pattern
+        1. Milvus search → returns chunk_id, email_id, score
+        2. Postgres lookup → returns actual chunk_text
+        
+        This keeps Milvus lean (vectors only) while Postgres remains
+        the system of record for content.
+        """
         query_embedding = self.embed_query(query)
         
+        # Step 1: Vector search in Milvus (returns IDs, not content)
         results = self.milvus.search(
             query_vector=query_embedding,
             top_k=top_k,
             collection_name=self.collection_name,
             filter_expr=self.filter_expr,
-            output_fields=["subject", "sender", "text", "date", "section_type", "account_id"],
+            output_fields=[
+                "pk",
+                "email_id", 
+                "chunk_hash",
+                "section_type", 
+                "account_id",
+                "email_timestamp",
+            ],
         )
         
         chunks = []
         for hit in results:
+            entity = hit.get("entity", {})
+            email_id = entity.get("email_id")
+            chunk_hash = entity.get("chunk_hash")
+            
+            # Step 2: Hydrate content from Postgres
+            content = await self._hydrate_chunk_content(email_id, chunk_hash)
+            
+            if not content:
+                logger.warning(f"Could not hydrate chunk: email_id={email_id}, chunk_hash={chunk_hash}")
+                content = f"[Content unavailable for {entity.get('section_type', 'unknown')} section]"
+            
             chunk = RetrievedChunk(
-                content=hit.get("entity", {}).get("text", ""),
-                source=hit.get("entity", {}).get("subject", "unknown"),
+                content=content,
+                source=f"email:{email_id}",
                 score=1 - hit.get("distance", 0),  # Convert distance to similarity
                 metadata={
-                    "sender": hit.get("entity", {}).get("sender"),
-                    "date": hit.get("entity", {}).get("date"),
+                    "email_id": email_id,
+                    "chunk_hash": chunk_hash,
+                    "section_type": entity.get("section_type"),
+                    "account_id": entity.get("account_id"),
+                    "timestamp": entity.get("email_timestamp"),
                 }
             )
             chunks.append(chunk)
         
         return chunks
+    
+    async def _hydrate_chunk_content(self, email_id: str, chunk_hash: str) -> str | None:
+        """
+        Fetch actual chunk text from Lattice Postgres.
+        
+        Uses LATTICE_DATABASE_URL (separate from LangGraph checkpoints DATABASE_URL).
+        Postgres is the system of record - Milvus only stores vectors.
+        """
+        try:
+            import os
+            import asyncpg
+            
+            # Use dedicated Lattice database URL (separate from LangGraph checkpoints)
+            lattice_db_url = os.getenv("LATTICE_DATABASE_URL")
+            
+            if not lattice_db_url:
+                logger.error("LATTICE_DATABASE_URL not set - cannot hydrate chunk content")
+                return None
+            
+            # Quick connection for hydration
+            # TODO: In production, use a connection pool instead of per-request connections
+            conn = await asyncpg.connect(lattice_db_url)
+            try:
+                row = await conn.fetchrow("""
+                    SELECT chunk_text 
+                    FROM email_chunk 
+                    WHERE email_id = $1::uuid AND chunk_hash = $2
+                """, email_id, chunk_hash)
+                
+                return row["chunk_text"] if row else None
+            finally:
+                await conn.close()
+                
+        except Exception as e:
+            logger.error(f"Failed to hydrate chunk from Lattice Postgres: {e}")
+            return None
     
     # -------------------------------------------------------------------------
     # Relevance & Grounding Checks
