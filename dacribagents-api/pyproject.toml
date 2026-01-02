@@ -50,6 +50,7 @@ dependencies = [
     "botocore>=1.42.11",
     "pypdf>=6.4.2",
     "confluent-kafka>=2.3.0",
+    "einops>=0.8.1",
 ]
 
 [dependency-groups]
