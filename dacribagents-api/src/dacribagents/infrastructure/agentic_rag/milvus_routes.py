@@ -86,7 +86,7 @@ def get_embedding_model():
     """Get embedding model for encoding queries."""
     try:
         from sentence_transformers import SentenceTransformer
-        return SentenceTransformer("all-MiniLM-L6-v2")
+        return SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
     except Exception as e:
         logger.error(f"Failed to load embedding model: {e}")
         raise HTTPException(status_code=503, detail=f"Embedding model unavailable: {str(e)}")

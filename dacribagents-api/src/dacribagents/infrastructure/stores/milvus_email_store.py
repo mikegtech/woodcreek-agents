@@ -11,7 +11,7 @@ from dacribagents.infrastructure.milvus_client import MilvusClientWrapper
 
 
 COLLECTION_NAME = "emails"
-EMBEDDING_DIM = 384  # all-MiniLM-L6-v2
+EMBEDDING_DIM = 768  # nomic-ai/nomic-embed-text-v1.5
 
 
 class MilvusEmailStore(VectorStore):

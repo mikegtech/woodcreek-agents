@@ -335,7 +335,7 @@ class AgenticRAGGraph:
         elif hasattr(self.retriever, "search"):
             # For MilvusClientWrapper
             from sentence_transformers import SentenceTransformer
-            embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            embedder = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
             query_vec = embedder.encode(query).tolist()
             
             results = self.retriever.search(

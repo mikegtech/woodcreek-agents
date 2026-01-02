@@ -98,8 +98,8 @@ class Settings(BaseSettings):
     # =========================================================================
     # Embeddings
     # =========================================================================
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    embedding_dimension: int = 384
+    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5"
+    embedding_dimension: int = 768
 
     # =========================================================================
     # Email Worker

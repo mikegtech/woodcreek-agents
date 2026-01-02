@@ -224,7 +224,7 @@ class AgenticRAG:
         """Lazy load the embedding model."""
         if self._embedder is None:
             from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            self._embedder = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
         return self._embedder
     
     # -------------------------------------------------------------------------

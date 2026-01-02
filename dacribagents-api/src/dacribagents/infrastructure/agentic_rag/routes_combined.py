@@ -160,8 +160,8 @@ async def health_check() -> HealthResponse:
     # Check embedding model
     try:
         from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        components["embeddings"] = "ok (all-MiniLM-L6-v2)"
+        model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
+        components["embeddings"] = "ok (nomic-ai/nomic-embed-text-v1.5)"
     except Exception as e:
         components["embeddings"] = f"error: {str(e)[:50]}"
     

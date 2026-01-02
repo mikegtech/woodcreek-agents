@@ -376,7 +376,7 @@ Generate 3 questions, one per line:""")
         # Compute semantic similarity using embeddings
         try:
             from sentence_transformers import SentenceTransformer
-            model = SentenceTransformer("all-MiniLM-L6-v2")
+            model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
             
             # Embed original question and generated questions
             original_embedding = model.encode(question)
