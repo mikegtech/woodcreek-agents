@@ -2,6 +2,7 @@
 
 # DeepLearning.AI certification materials
 docs/Certifications/DeepLearning.AI/
+docs/Certifications/Professional_Agentic_AI/
 
 # Traefik ACME certificates
 infra/traefik/acme.json
