@@ -341,7 +341,7 @@ class AgenticRAGGraph:
             results = self.retriever.search(
                 query_vector=query_vec,
                 top_k=5,
-                output_fields=["text", "subject", "sender"],
+                output_fields=["pk", "email_id", "chunk_hash", "section_type", "account_id", "email_timestamp"],
             )
             
             docs = [

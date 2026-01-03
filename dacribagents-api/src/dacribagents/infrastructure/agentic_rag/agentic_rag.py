@@ -30,6 +30,34 @@ from dacribagents.infrastructure.milvus_client import MilvusClientWrapper
 
 
 # =============================================================================
+# Embedding Model Configuration (imported from factory)
+# =============================================================================
+
+
+class EmbeddingModel(Enum):
+    """Supported embedding models with their configurations."""
+    NOMIC = "nomic"
+    E5_BASE = "e5-base"         # ONNX-optimized E5-base-v2
+    E5_LARGE = "e5-large"
+    E5_SMALL = "e5-small"
+    OPENAI_SMALL = "openai-small"
+    OPENAI_LARGE = "openai-large"
+    MINILM = "minilm"           # For testing
+
+
+def get_embedding_config(model: str | EmbeddingModel) -> dict:
+    """Get configuration for an embedding model from the factory."""
+    from dacribagents.infrastructure.embeddings_factory import get_model_config
+    
+    if isinstance(model, EmbeddingModel):
+        model_key = model.value
+    else:
+        model_key = model.lower()
+    
+    return get_model_config(model_key)
+
+
+# =============================================================================
 # Data Models
 # =============================================================================
 
@@ -58,11 +86,12 @@ class RetrievedChunk:
     source: str
     score: float
     metadata: dict[str, Any] = field(default_factory=dict)
+    relevance_threshold: float = 0.5  # Configurable per-chunk
     
     @property
     def is_relevant(self) -> bool:
         """Check if chunk meets relevance threshold."""
-        return self.score >= 0.7
+        return self.score >= self.relevance_threshold
 
 
 @dataclass
@@ -77,10 +106,12 @@ class RAGResult:
     iterations: int
     strategy_used: RetrievalStrategy
     sub_queries: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    grounding_threshold: float = 0.7  # Store for reference
     
     @property
     def success(self) -> bool:
-        return self.is_grounded and self.confidence >= 0.7
+        return self.is_grounded and self.confidence >= self.grounding_threshold
 
 
 # =============================================================================
@@ -194,6 +225,7 @@ class AgenticRAG:
     - Relevance filtering
     - Grounding verification
     - Self-correction loops
+    - Configurable embedding models and thresholds
     """
     
     def __init__(
@@ -203,28 +235,71 @@ class AgenticRAG:
         collection_name: str = "email_chunks_v1",
         filter_expr: str | None = None,
         max_iterations: int = 3,
-        relevance_threshold: float = 0.7,
-        grounding_threshold: float = 0.8,
+        # Configurable thresholds (None = use model defaults)
+        relevance_threshold: float | None = None,
+        grounding_threshold: float | None = None,
+        # Configurable embedding model
+        embedding_model: str | EmbeddingModel = EmbeddingModel.NOMIC,
     ):
         self.llm = llm
         self.milvus = milvus_client
         self.collection_name = collection_name
         self.filter_expr = filter_expr
         self.max_iterations = max_iterations
-        self.relevance_threshold = relevance_threshold
-        self.grounding_threshold = grounding_threshold
         
-        # Embedding model for queries
+        # Get embedding configuration
+        self._embedding_model_enum = (
+            EmbeddingModel(embedding_model.lower()) 
+            if isinstance(embedding_model, str) 
+            else embedding_model
+        )
+        self._embedding_config = get_embedding_config(self._embedding_model_enum)
+        
+        # Set thresholds (use provided or model defaults)
+        self.relevance_threshold = (
+            relevance_threshold 
+            if relevance_threshold is not None 
+            else self._embedding_config["default_relevance_threshold"]
+        )
+        self.grounding_threshold = (
+            grounding_threshold 
+            if grounding_threshold is not None 
+            else self._embedding_config["default_grounding_threshold"]
+        )
+        
+        # Embedding model (lazy loaded)
         self._embedder = None
         
-        logger.info(f"AgenticRAG initialized with collection={collection_name}, filter={filter_expr}")
+        logger.info(
+            f"AgenticRAG initialized: "
+            f"collection={collection_name}, "
+            f"filter={filter_expr}, "
+            f"embedding_model={self._embedding_config['model_name']}, "
+            f"relevance_threshold={self.relevance_threshold}, "
+            f"grounding_threshold={self.grounding_threshold}"
+        )
+    
+    @property
+    def embedding_model_name(self) -> str:
+        """Get the full model name for the current embedding model."""
+        return self._embedding_config["model_name"]
+    
+    @property
+    def embedding_dimensions(self) -> int:
+        """Get the embedding dimensions for the current model."""
+        return self._embedding_config["dimensions"]
     
     @property
     def embedder(self):
-        """Lazy load the embedding model."""
+        """Lazy load the embedding model via factory."""
         if self._embedder is None:
-            from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
+            from dacribagents.infrastructure.embeddings_factory import EmbeddingsFactory
+            
+            model_key = self._embedding_model_enum.value
+            logger.info(f"Loading embedder via factory: {model_key}")
+            
+            self._embedder = EmbeddingsFactory.from_model_key(model_key)
+        
         return self._embedder
     
     # -------------------------------------------------------------------------
@@ -301,8 +376,9 @@ class AgenticRAG:
     # -------------------------------------------------------------------------
     
     def embed_query(self, query: str) -> list[float]:
-        """Generate embedding for query."""
-        return self.embedder.encode(query).tolist()
+        """Generate embedding for query using the configured embedder."""
+        # Factory's embedder.embed() handles prefixes internally
+        return self.embedder.embed(query)
     
     async def retrieve(
         self,
@@ -398,6 +474,7 @@ class AgenticRAG:
                 content=content,
                 source=f"email:{email_id}",
                 score=1 - hit.get("distance", 0),  # Convert distance to similarity
+                relevance_threshold=self.relevance_threshold,  # Pass threshold to chunk
                 metadata={
                     "email_id": email_id,
                     "chunk_hash": chunk_hash,
@@ -466,7 +543,9 @@ class AgenticRAG:
         
         for chunk in chunks:
             # Quick filter by vector similarity score
+            # Use 80% of threshold as hard cutoff
             if chunk.score < self.relevance_threshold * 0.8:
+                logger.debug(f"Chunk filtered (score {chunk.score:.3f} < {self.relevance_threshold * 0.8:.3f})")
                 continue
             
             # LLM-based relevance check for borderline cases
@@ -489,8 +568,10 @@ class AgenticRAG:
             
             if chunk.score >= self.relevance_threshold:
                 relevant_chunks.append(chunk)
+            else:
+                logger.debug(f"Chunk filtered after LLM check (score {chunk.score:.3f} < {self.relevance_threshold:.3f})")
         
-        logger.info(f"Relevance filtering: {len(chunks)} → {len(relevant_chunks)} chunks")
+        logger.info(f"Relevance filtering: {len(chunks)} → {len(relevant_chunks)} chunks (threshold={self.relevance_threshold})")
         return relevant_chunks
     
     async def check_grounding(
@@ -670,6 +751,7 @@ class AgenticRAG:
                 iterations=iterations,
                 strategy_used=current_strategy,
                 sub_queries=sub_queries,
+                grounding_threshold=self.grounding_threshold,
             )
             result.metadata = {"issues": issues}
             
@@ -679,14 +761,18 @@ class AgenticRAG:
                 return result
             
             # Keep best result so far
-            if best_result is None or confidence > best_result.confidence:
+            if best_result is None or (result and confidence > best_result.confidence):
                 best_result = result
             
             logger.info(f"Response not well-grounded (confidence={confidence}), retrying...")
         
         # Return best result after max iterations
-        logger.warning(f"Max iterations reached, returning best result (confidence={best_result.confidence})")
-        return best_result or RAGResult(
+        if best_result:
+            logger.warning(f"Max iterations reached, returning best result (confidence={best_result.confidence})")
+            return best_result
+        
+        logger.warning("Max iterations reached with no valid result")
+        return RAGResult(
             query=query,
             reformulated_query=reformulated,
             retrieved_chunks=[],
@@ -696,6 +782,7 @@ class AgenticRAG:
             iterations=iterations,
             strategy_used=strategy,
             sub_queries=sub_queries,
+            grounding_threshold=self.grounding_threshold,
         )
     
     async def multi_hop_query(
@@ -770,6 +857,7 @@ Comprehensive Answer:"""
             iterations=len(sub_queries),
             strategy_used=RetrievalStrategy.SEMANTIC,
             sub_queries=sub_queries,
+            grounding_threshold=self.grounding_threshold,
         )
 
 
@@ -782,6 +870,9 @@ def get_agentic_rag(
     collection_name: str = "email_chunks_v1",
     filter_expr: str | None = None,
     max_iterations: int = 3,
+    relevance_threshold: float | None = None,
+    grounding_threshold: float | None = None,
+    embedding_model: str = "nomic",
 ) -> AgenticRAG:
     """
     Factory function to create AgenticRAG instance.
@@ -792,6 +883,9 @@ def get_agentic_rag(
         collection_name: Milvus collection to search
         filter_expr: Optional Milvus filter expression (e.g., 'account_id == "workmail-hoa"')
         max_iterations: Max self-correction iterations
+        relevance_threshold: Override default relevance threshold (model-specific if None)
+        grounding_threshold: Override default grounding threshold (model-specific if None)
+        embedding_model: Embedding model to use ("nomic", "e5-large", "openai-small", etc.)
     """
     from dacribagents.application.agents.general_assistant import create_llm
     from dacribagents.infrastructure.milvus_client import get_milvus_client
@@ -807,4 +901,7 @@ def get_agentic_rag(
         collection_name=collection_name,
         filter_expr=filter_expr,
         max_iterations=max_iterations,
+        relevance_threshold=relevance_threshold,
+        grounding_threshold=grounding_threshold,
+        embedding_model=embedding_model,
     )

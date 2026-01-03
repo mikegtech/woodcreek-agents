@@ -645,7 +645,7 @@ async def get_embedding_info() -> dict[str, Any]:
         test_embedding = model.encode("test")
         
         return {
-            "model_name": "all-MiniLM-L6-v2",
+            "model_name": "nomic-ai/nomic-embed-text-v1.5",
             "dimension": len(test_embedding),
             "max_seq_length": model.max_seq_length,
             "normalize_embeddings": True,

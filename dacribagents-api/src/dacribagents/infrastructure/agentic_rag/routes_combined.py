@@ -4,18 +4,35 @@ Woodcreek Agents API Routes.
 Combines:
 - Chat endpoints with supervisor routing
 - Guardrails middleware
-- Agentic RAG endpoints
+- Agentic RAG endpoints (with configurable embedding models & thresholds)
 - Health checks
 """
 
 from __future__ import annotations
 
 import time
+from enum import Enum
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# Enums
+# =============================================================================
+
+
+class EmbeddingModelEnum(str, Enum):
+    """Supported embedding models for API requests."""
+    NOMIC = "nomic"
+    E5_BASE = "e5-base"       # ONNX-optimized, 768 dims
+    E5_LARGE = "e5-large"     # 1024 dims
+    E5_SMALL = "e5-small"     # 384 dims
+    OPENAI_SMALL = "openai-small"
+    OPENAI_LARGE = "openai-large"
+    MINILM = "minilm"         # For testing, 384 dims
 
 
 # =============================================================================
@@ -50,12 +67,46 @@ class ChatResponse(BaseModel):
 
 
 class RAGQueryRequest(BaseModel):
-    """Request for RAG query."""
+    """Request for RAG query with configurable parameters."""
     query: str = Field(..., description="The user's question")
     collection: str = Field(default="email_chunks_v1", description="Milvus collection to search")
     filter_expr: str | None = Field(default=None, description="Milvus filter (e.g., 'account_id == \"workmail-hoa\"')")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of documents to retrieve")
     max_iterations: int = Field(default=3, ge=1, le=5, description="Max self-correction iterations")
+    
+    # Configurable thresholds (None = use model-specific defaults)
+    relevance_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Override relevance threshold. If None, uses model default. Nomic: 0.35, E5: 0.6, OpenAI: 0.7"
+    )
+    grounding_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Override grounding threshold. If None, uses model default."
+    )
+    
+    # Configurable embedding model
+    embedding_model: EmbeddingModelEnum = Field(
+        default=EmbeddingModelEnum.NOMIC,
+        description="Embedding model for query encoding. Must match collection embeddings!"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "What is the link to the CC&Rs?",
+                "collection": "email_chunks_v1",
+                "filter_expr": 'account_id == "workmail-hoa"',
+                "top_k": 5,
+                "relevance_threshold": None,
+                "grounding_threshold": None,
+                "embedding_model": "nomic",
+                "max_iterations": 3
+            }
+        }
 
 
 class RAGQueryResponse(BaseModel):
@@ -69,6 +120,10 @@ class RAGQueryResponse(BaseModel):
     strategy_used: str
     sources: list[dict[str, Any]]
     processing_time_ms: float
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Configuration used for this query (for debugging)"
+    )
 
 
 class QueryAnalysisRequest(BaseModel):
@@ -92,7 +147,11 @@ class DocumentSearchRequest(BaseModel):
     collection: str = Field(default="email_chunks_v1", description="Collection to search")
     filter_expr: str | None = Field(default=None, description="Milvus filter expression")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of results")
-    min_score: float = Field(default=0.5, ge=0.0, le=1.0, description="Minimum relevance score")
+    min_score: float = Field(default=0.3, ge=0.0, le=1.0, description="Minimum relevance score")
+    embedding_model: EmbeddingModelEnum = Field(
+        default=EmbeddingModelEnum.NOMIC,
+        description="Embedding model for query encoding"
+    )
 
 
 class DocumentSearchResponse(BaseModel):
@@ -100,6 +159,7 @@ class DocumentSearchResponse(BaseModel):
     query: str
     results: list[dict[str, Any]]
     total_found: int
+    embedding_model: str
 
 
 class HealthResponse(BaseModel):
@@ -348,22 +408,32 @@ async def chat(request: ChatRequest) -> ChatResponse:
 @router.post("/rag/query", response_model=RAGQueryResponse, tags=["Agentic RAG"])
 async def rag_query(request: RAGQueryRequest) -> RAGQueryResponse:
     """
-    Execute an Agentic RAG query with self-correction.
+    Execute an Agentic RAG query with configurable parameters.
     
     Features:
+    - Configurable embedding model (must match collection)
+    - Adjustable relevance/grounding thresholds
     - Query reformulation for better retrieval
     - Document relevance grading
     - Response grounding verification
     - Self-correction if not grounded
     
+    Model-Specific Default Thresholds:
+    - nomic: relevance=0.35, grounding=0.50 (scores range 0.3-0.6, 768 dims)
+    - e5-base: relevance=0.60, grounding=0.70 (scores range 0.6-0.85, 768 dims, ONNX)
+    - e5-large: relevance=0.60, grounding=0.70 (scores range 0.6-0.85, 1024 dims)
+    - openai-small: relevance=0.70, grounding=0.75 (scores range 0.7-0.95, 1536 dims)
+    
     Example:
     ```json
     POST /rag/query
     {
-        "query": "What are the fence height limits?",
+        "query": "What is the link to the CC&Rs?",
         "collection": "email_chunks_v1",
-        "top_k": 5,
-        "max_iterations": 3
+        "filter_expr": "account_id == \\"workmail-hoa\\"",
+        "embedding_model": "nomic",
+        "relevance_threshold": null,
+        "top_k": 5
     }
     ```
     """
@@ -374,12 +444,24 @@ async def rag_query(request: RAGQueryRequest) -> RAGQueryResponse:
     try:
         from dacribagents.infrastructure.agentic_rag import get_agentic_rag
         
+        # Create RAG instance with configurable parameters
         rag = get_agentic_rag(
             collection_name=request.collection,
+            filter_expr=request.filter_expr,
             max_iterations=request.max_iterations,
+            relevance_threshold=request.relevance_threshold,
+            grounding_threshold=request.grounding_threshold,
+            embedding_model=request.embedding_model.value,
         )
         
         result = await rag.query(request.query, top_k=request.top_k)
+        
+        # Handle None result
+        if result is None:
+            raise HTTPException(
+                status_code=500,
+                detail="RAG query returned no result - check logs for errors"
+            )
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -390,7 +472,7 @@ async def rag_query(request: RAGQueryRequest) -> RAGQueryResponse:
             is_grounded=result.is_grounded,
             confidence=result.confidence,
             iterations=result.iterations,
-            strategy_used=result.strategy_used.value,
+            strategy_used=result.strategy_used.value if result.strategy_used else "unknown",
             sources=[
                 {
                     "source": chunk.source,
@@ -400,8 +482,17 @@ async def rag_query(request: RAGQueryRequest) -> RAGQueryResponse:
                 for chunk in result.retrieved_chunks[:5]
             ],
             processing_time_ms=processing_time,
+            config={
+                "embedding_model": request.embedding_model.value,
+                "relevance_threshold": rag.relevance_threshold,
+                "grounding_threshold": rag.grounding_threshold,
+                "collection": request.collection,
+                "filter": request.filter_expr,
+            }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"RAG query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -470,7 +561,8 @@ async def search_documents(request: DocumentSearchRequest) -> DocumentSearchResp
         "query": "fence requirements",
         "collection": "email_chunks_v1",
         "top_k": 10,
-        "min_score": 0.6
+        "min_score": 0.3,
+        "embedding_model": "nomic"
     }
     ```
     """
@@ -479,7 +571,11 @@ async def search_documents(request: DocumentSearchRequest) -> DocumentSearchResp
     try:
         from dacribagents.infrastructure.agentic_rag import get_agentic_rag
         
-        rag = get_agentic_rag(collection_name=request.collection)
+        rag = get_agentic_rag(
+            collection_name=request.collection,
+            filter_expr=request.filter_expr,
+            embedding_model=request.embedding_model.value,
+        )
         chunks = await rag.retrieve(request.query, top_k=request.top_k)
         filtered = [c for c in chunks if c.score >= request.min_score]
         
@@ -495,6 +591,7 @@ async def search_documents(request: DocumentSearchRequest) -> DocumentSearchResp
                 for chunk in filtered
             ],
             total_found=len(filtered),
+            embedding_model=request.embedding_model.value,
         )
         
     except Exception as e:
@@ -546,7 +643,8 @@ async def multi_hop_query(request: RAGQueryRequest) -> dict[str, Any]:
     ```json
     POST /rag/multi-hop
     {
-        "query": "What modifications need approval and how long does it take?"
+        "query": "What modifications need approval and how long does it take?",
+        "embedding_model": "nomic"
     }
     ```
     """
@@ -559,7 +657,11 @@ async def multi_hop_query(request: RAGQueryRequest) -> dict[str, Any]:
         
         rag = get_agentic_rag(
             collection_name=request.collection,
+            filter_expr=request.filter_expr,
             max_iterations=request.max_iterations,
+            relevance_threshold=request.relevance_threshold,
+            grounding_threshold=request.grounding_threshold,
+            embedding_model=request.embedding_model.value,
         )
         result = await rag.multi_hop_query(request.query, top_k=request.top_k)
         
@@ -573,6 +675,11 @@ async def multi_hop_query(request: RAGQueryRequest) -> dict[str, Any]:
             "confidence": result.confidence,
             "documents_used": len(result.retrieved_chunks),
             "processing_time_ms": processing_time,
+            "config": {
+                "embedding_model": request.embedding_model.value,
+                "relevance_threshold": rag.relevance_threshold,
+                "grounding_threshold": rag.grounding_threshold,
+            }
         }
         
     except Exception as e:
@@ -612,6 +719,57 @@ async def list_collections() -> dict[str, Any]:
         
     except Exception as e:
         logger.exception(f"Failed to list collections: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/rag/models", tags=["Agentic RAG"])
+async def list_embedding_models() -> dict[str, Any]:
+    """
+    List available embedding models with their configurations.
+    
+    Useful for understanding default thresholds per model.
+    """
+    try:
+        from dacribagents.infrastructure.embeddings_factory import (
+            EMBEDDING_MODELS,
+            EmbeddingsFactory,
+        )
+        
+        # Check service availability
+        e5_available = EmbeddingsFactory.check_e5_available()
+        nomic_available = EmbeddingsFactory.check_nomic_available()
+        
+        models_info = {}
+        for key, config in EMBEDDING_MODELS.items():
+            models_info[key] = {
+                "dimension": config["dimension"],
+                "max_tokens": config["max_tokens"],
+                "default_relevance_threshold": config["default_relevance_threshold"],
+                "default_grounding_threshold": config["default_grounding_threshold"],
+                "score_range": config["score_range"],
+                "provider": config["provider"],
+            }
+            
+            # Add availability status for HTTP providers
+            if key == "e5-base":
+                models_info[key]["available"] = e5_available
+                models_info[key]["endpoint"] = config.get("endpoint_default", "")
+            elif key == "nomic":
+                models_info[key]["available"] = nomic_available
+                models_info[key]["endpoint"] = config.get("endpoint_default", "")
+        
+        return {
+            "models": models_info,
+            "default": "e5-base",
+            "services": {
+                "e5": {"available": e5_available, "endpoint": "http://dataops.trupryce.ai:8000"},
+                "nomic": {"available": nomic_available, "endpoint": "http://dataops.trupryce.ai:8001"},
+            },
+            "note": "Embedding model used for queries MUST match the model used to create collection embeddings!"
+        }
+        
+    except Exception as e:
+        logger.exception(f"Failed to list embedding models: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
