@@ -7,6 +7,7 @@ Useful for debugging, learning, and NVIDIA exam preparation.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -15,6 +16,22 @@ from pydantic import BaseModel, Field
 
 
 router = APIRouter(prefix="/milvus", tags=["Milvus Exploration"])
+
+
+# =============================================================================
+# Enums & Constants
+# =============================================================================
+
+
+class EmbeddingModelEnum(str, Enum):
+    """Supported embedding models."""
+    NOMIC = "nomic"
+    E5_BASE = "e5-base"
+    E5_LARGE = "e5-large"
+    E5_SMALL = "e5-small"
+    OPENAI_SMALL = "openai-small"
+    OPENAI_LARGE = "openai-large"
+    MINILM = "minilm"
 
 
 # =============================================================================
@@ -48,6 +65,10 @@ class VectorSearchRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=100)
     filter_expr: str | None = Field(default=None, description="Milvus filter expression")
     output_fields: list[str] | None = Field(default=None, description="Fields to return")
+    embedding_model: EmbeddingModelEnum = Field(
+        default=EmbeddingModelEnum.E5_BASE,
+        description="Embedding model to use for query"
+    )
 
 
 class VectorSearchResult(BaseModel):
@@ -67,6 +88,15 @@ class QueryRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
 
 
+class EmbedRequest(BaseModel):
+    """Embed text request."""
+    text: str = Field(..., description="Text to embed")
+    embedding_model: EmbeddingModelEnum = Field(
+        default=EmbeddingModelEnum.E5_BASE,
+        description="Embedding model to use"
+    )
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -82,14 +112,26 @@ def get_milvus_client():
         raise HTTPException(status_code=503, detail=f"Milvus unavailable: {str(e)}")
 
 
-def get_embedding_model():
-    """Get embedding model for encoding queries."""
+def get_embedder(model: str | EmbeddingModelEnum = EmbeddingModelEnum.E5_BASE):
+    """
+    Get embedder from factory.
+    
+    Args:
+        model: Model key (e.g., "e5-base", "nomic")
+    
+    Returns:
+        Embedder instance (HttpEmbedder, SentenceTransformerEmbedder, etc.)
+    """
     try:
-        from sentence_transformers import SentenceTransformer
-        return SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
+        from dacribagents.infrastructure.embeddings.factory import EmbeddingsFactory
+        
+        model_key = model.value if isinstance(model, EmbeddingModelEnum) else model
+        logger.debug(f"Loading embedder: {model_key}")
+        
+        return EmbeddingsFactory.from_model_key(model_key)
     except Exception as e:
-        logger.error(f"Failed to load embedding model: {e}")
-        raise HTTPException(status_code=503, detail=f"Embedding model unavailable: {str(e)}")
+        logger.error(f"Failed to load embedder '{model}': {e}")
+        raise HTTPException(status_code=503, detail=f"Embedder unavailable: {str(e)}")
 
 
 # =============================================================================
@@ -467,21 +509,23 @@ async def vector_search(request: VectorSearchRequest) -> VectorSearchResult:
     """
     Execute a vector similarity search.
     
-    1. Embeds the query text using sentence-transformers
+    1. Embeds the query text using the specified embedding model
     2. Searches for similar vectors in Milvus
     3. Returns matching documents with similarity scores
+    
+    IMPORTANT: embedding_model MUST match the model used to embed the collection data!
     
     Supports optional filtering with Milvus expressions.
     """
     milvus = get_milvus_client()
-    model = get_embedding_model()
+    embedder = get_embedder(request.embedding_model)
     
     if not milvus.client.has_collection(request.collection):
         raise HTTPException(status_code=404, detail=f"Collection '{request.collection}' not found")
     
     try:
-        # Embed query
-        query_vector = model.encode(request.query_text).tolist()
+        # Embed query using factory embedder
+        query_vector = embedder.embed(request.query_text)
         
         # Get default output fields
         output_fields = request.output_fields
@@ -520,6 +564,7 @@ async def vector_search(request: VectorSearchRequest) -> VectorSearchResult:
                 "top_k": request.top_k,
                 "filter": request.filter_expr,
                 "metric": "COSINE",
+                "embedding_model": request.embedding_model.value,
             },
         )
     except Exception as e:
@@ -632,23 +677,54 @@ async def get_entity_by_pk(
 
 
 @router.get("/embedding-info")
-async def get_embedding_info() -> dict[str, Any]:
+async def get_embedding_info(
+    embedding_model: EmbeddingModelEnum = Query(
+        default=EmbeddingModelEnum.E5_BASE,
+        description="Embedding model to get info for"
+    ),
+) -> dict[str, Any]:
     """
-    Get information about the embedding model being used.
+    Get information about an embedding model.
     
-    Useful for understanding vector dimensions and model capabilities.
+    Shows dimension, thresholds, and service availability.
     """
     try:
-        model = get_embedding_model()
+        from dacribagents.infrastructure.embeddings.factory import (
+            EMBEDDING_MODELS,
+            EmbeddingsFactory,
+        )
         
-        # Get model info
-        test_embedding = model.encode("test")
+        model_key = embedding_model.value
+        config = EMBEDDING_MODELS.get(model_key, {})
+        
+        # Check service availability for HTTP models
+        available = True
+        if config.get("provider") == "http":
+            if model_key == "e5-base":
+                available = EmbeddingsFactory.check_e5_available()
+            elif model_key == "nomic":
+                available = EmbeddingsFactory.check_nomic_available()
+        
+        # Test embedding
+        test_vector = None
+        if available:
+            try:
+                embedder = get_embedder(embedding_model)
+                test_vector = embedder.embed("test")
+            except Exception as e:
+                logger.warning(f"Failed to test embed: {e}")
         
         return {
-            "model_name": "nomic-ai/nomic-embed-text-v1.5",
-            "dimension": len(test_embedding),
-            "max_seq_length": model.max_seq_length,
-            "normalize_embeddings": True,
+            "model": model_key,
+            "provider": config.get("provider", "unknown"),
+            "dimension": config.get("dimension", 768),
+            "max_tokens": config.get("max_tokens"),
+            "default_relevance_threshold": config.get("default_relevance_threshold"),
+            "default_grounding_threshold": config.get("default_grounding_threshold"),
+            "score_range": config.get("score_range"),
+            "endpoint": config.get("endpoint_default"),
+            "available": available,
+            "test_vector_dimension": len(test_vector) if test_vector else None,
             "metric_recommendation": "COSINE",
         }
     except Exception as e:
@@ -656,26 +732,146 @@ async def get_embedding_info() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/embedding-models")
+async def list_embedding_models() -> dict[str, Any]:
+    """
+    List all available embedding models with their configurations.
+    
+    Use this to understand which models are available and their characteristics.
+    """
+    try:
+        from dacribagents.infrastructure.embeddings.factory import (
+            EMBEDDING_MODELS,
+            EmbeddingsFactory,
+        )
+        
+        # Check service availability
+        e5_available = EmbeddingsFactory.check_e5_available()
+        nomic_available = EmbeddingsFactory.check_nomic_available()
+        
+        models = {}
+        for key, config in EMBEDDING_MODELS.items():
+            models[key] = {
+                "provider": config.get("provider"),
+                "dimension": config.get("dimension"),
+                "max_tokens": config.get("max_tokens"),
+                "default_relevance_threshold": config.get("default_relevance_threshold"),
+                "score_range": config.get("score_range"),
+            }
+            
+            # Add availability for HTTP models
+            if key == "e5-base":
+                models[key]["available"] = e5_available
+            elif key == "nomic":
+                models[key]["available"] = nomic_available
+        
+        return {
+            "models": models,
+            "default": "e5-base",
+            "services": {
+                "e5": {"available": e5_available, "endpoint": "http://dataops.trupryce.ai:8000"},
+                "nomic": {"available": nomic_available, "endpoint": "http://dataops.trupryce.ai:8001"},
+            },
+            "note": "Query embedding model MUST match document embedding model!",
+        }
+    except Exception as e:
+        logger.exception(f"Failed to list models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/embed")
-async def embed_text(
-    text: str = Query(..., description="Text to embed"),
-) -> dict[str, Any]:
+async def embed_text(request: EmbedRequest) -> dict[str, Any]:
     """
     Embed text and return the vector.
     
     Useful for testing embeddings and understanding vector representation.
+    Specify embedding_model to use different models.
     """
     try:
-        model = get_embedding_model()
-        vector = model.encode(text).tolist()
+        embedder = get_embedder(request.embedding_model)
+        vector = embedder.embed(request.text)
         
         return {
-            "text": text,
-            "text_length": len(text),
+            "text": request.text,
+            "text_length": len(request.text),
+            "embedding_model": request.embedding_model.value,
             "vector_dimension": len(vector),
             "vector": vector,
             "vector_preview": vector[:10],  # First 10 dimensions
         }
     except Exception as e:
         logger.exception(f"Embedding failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/embed/batch")
+async def embed_texts_batch(
+    texts: list[str],
+    embedding_model: EmbeddingModelEnum = Query(
+        default=EmbeddingModelEnum.E5_BASE,
+        description="Embedding model to use"
+    ),
+) -> dict[str, Any]:
+    """
+    Embed multiple texts in a batch.
+    
+    More efficient than calling /embed multiple times.
+    """
+    try:
+        embedder = get_embedder(embedding_model)
+        vectors = embedder.embed_batch(texts)
+        
+        return {
+            "count": len(texts),
+            "embedding_model": embedding_model.value,
+            "vector_dimension": len(vectors[0]) if vectors else 0,
+            "vectors": vectors,
+        }
+    except Exception as e:
+        logger.exception(f"Batch embedding failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/compare-embeddings")
+async def compare_embeddings(
+    text: str = Query(..., description="Text to embed with both models"),
+) -> dict[str, Any]:
+    """
+    Embed the same text with both E5 and Nomic to compare.
+    
+    Useful for understanding why model mismatch causes low scores.
+    Shows that same text produces DIFFERENT vectors in different models.
+    """
+    try:
+        import numpy as np
+        
+        e5_embedder = get_embedder(EmbeddingModelEnum.E5_BASE)
+        nomic_embedder = get_embedder(EmbeddingModelEnum.NOMIC)
+        
+        e5_vector = e5_embedder.embed(text)
+        nomic_vector = nomic_embedder.embed(text)
+        
+        # Calculate cosine similarity between the two
+        e5_arr = np.array(e5_vector)
+        nomic_arr = np.array(nomic_vector)
+        
+        cosine_sim = float(np.dot(e5_arr, nomic_arr) / (
+            np.linalg.norm(e5_arr) * np.linalg.norm(nomic_arr)
+        ))
+        
+        return {
+            "text": text,
+            "e5_vector_preview": e5_vector[:5],
+            "nomic_vector_preview": nomic_vector[:5],
+            "e5_dimension": len(e5_vector),
+            "nomic_dimension": len(nomic_vector),
+            "cross_model_similarity": cosine_sim,
+            "explanation": (
+                f"Cross-model similarity is {cosine_sim:.3f}. "
+                "This shows why querying with the wrong model produces low scores - "
+                "the vectors are in different spaces even though dimensions match!"
+            ),
+        }
+    except Exception as e:
+        logger.exception(f"Comparison failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

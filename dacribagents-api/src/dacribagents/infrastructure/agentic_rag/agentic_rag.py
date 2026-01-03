@@ -47,7 +47,7 @@ class EmbeddingModel(Enum):
 
 def get_embedding_config(model: str | EmbeddingModel) -> dict:
     """Get configuration for an embedding model from the factory."""
-    from dacribagents.infrastructure.embeddings_factory import get_model_config
+    from dacribagents.infrastructure.embeddings.factory import get_model_config
     
     if isinstance(model, EmbeddingModel):
         model_key = model.value
@@ -270,30 +270,33 @@ class AgenticRAG:
         # Embedding model (lazy loaded)
         self._embedder = None
         
+        # Get model identifier for logging (HTTP configs may not have model_name)
+        model_id = self._embedding_config.get('model_name', self._embedding_model_enum.value)
+        
         logger.info(
             f"AgenticRAG initialized: "
             f"collection={collection_name}, "
             f"filter={filter_expr}, "
-            f"embedding_model={self._embedding_config['model_name']}, "
+            f"embedding_model={model_id}, "
             f"relevance_threshold={self.relevance_threshold}, "
             f"grounding_threshold={self.grounding_threshold}"
         )
     
     @property
     def embedding_model_name(self) -> str:
-        """Get the full model name for the current embedding model."""
-        return self._embedding_config["model_name"]
+        """Get the model name/identifier for the current embedding model."""
+        return self._embedding_config.get("model_name", self._embedding_model_enum.value)
     
     @property
     def embedding_dimensions(self) -> int:
         """Get the embedding dimensions for the current model."""
-        return self._embedding_config["dimensions"]
+        return self._embedding_config.get("dimension", self._embedding_config.get("dimensions", 768))
     
     @property
     def embedder(self):
         """Lazy load the embedding model via factory."""
         if self._embedder is None:
-            from dacribagents.infrastructure.embeddings_factory import EmbeddingsFactory
+            from dacribagents.infrastructure.embeddings.factory import EmbeddingsFactory
             
             model_key = self._embedding_model_enum.value
             logger.info(f"Loading embedder via factory: {model_key}")

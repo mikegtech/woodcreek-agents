@@ -280,6 +280,7 @@ class OpenAIEmbedder:
 EMBEDDING_MODELS = {
     "nomic": {
         "provider": "http",
+        "model_name": "nomic-ai/nomic-embed-text-v1.5",  # For reference
         "endpoint_env": "NOMIC_ENDPOINT",
         "endpoint_default": "http://dataops.trupryce.ai:8001",
         "query_prefix": "search_query: ",      # For queries
@@ -292,6 +293,7 @@ EMBEDDING_MODELS = {
     },
     "e5-base": {
         "provider": "http",
+        "model_name": "intfloat/e5-base-v2",  # For reference
         "endpoint_env": "E5_ENDPOINT",
         "endpoint_default": "http://dataops.trupryce.ai:8000",
         "query_prefix": "query: ",

@@ -730,7 +730,7 @@ async def list_embedding_models() -> dict[str, Any]:
     Useful for understanding default thresholds per model.
     """
     try:
-        from dacribagents.infrastructure.embeddings_factory import (
+        from dacribagents.infrastructure.embeddings.factory import (
             EMBEDDING_MODELS,
             EmbeddingsFactory,
         )
