@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import psycopg
+from psycopg.types.json import Json
 
 from dacribagents.domain.reminders.entities import (
     ApprovalRecord,
@@ -92,7 +93,7 @@ class PostgresReminderStore:
                  reminder.urgency.value, reminder.intent.value, reminder.source.value,
                  reminder.source_agent, reminder.source_event_id, reminder.dedupe_key,
                  reminder.state.value, reminder.requires_approval, reminder.created_by,
-                 reminder.created_at, reminder.updated_at, {}),
+                 reminder.created_at, reminder.updated_at, Json({})),
             )
             self._conn.commit()
         return reminder
@@ -342,7 +343,7 @@ class PostgresReminderStore:
             cur.execute(
                 "INSERT INTO reminder_approval_records (id, reminder_id, action, actor_id, reason, created_at, metadata) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (record.id, record.reminder_id, record.action.value, record.actor_id, record.reason, record.created_at, {}),
+                (record.id, record.reminder_id, record.action.value, record.actor_id, record.reason, record.created_at, Json({})),
             )
             self._conn.commit()
         return record
