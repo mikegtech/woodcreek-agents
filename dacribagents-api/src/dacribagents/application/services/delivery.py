@@ -24,7 +24,7 @@ from loguru import logger
 from dacribagents.application.ports.delivery_channel import DeliveryChannelAdapter, DeliveryResult
 from dacribagents.application.ports.event_publisher import DomainEvent, EventPublisher, NoOpEventPublisher
 from dacribagents.application.ports.reminder_store import ReminderStore
-from dacribagents.application.services import channel_policy
+from dacribagents.application.services import channel_policy, governance
 from dacribagents.domain.reminders.entities import (
     Reminder,
     ReminderDelivery,
@@ -68,6 +68,19 @@ class DeliveryDispatcher:
 
     def _dispatch_reminder(self, reminder: Reminder) -> list[ReminderDelivery]:
         """Resolve targets, select channels, send, record results."""
+        # Governance gate: check if autonomous dispatch is allowed
+        gov_decision = governance.evaluate(
+            household_id=reminder.household_id,
+            action_type="auto_send",
+            actor_type="system",
+            requires_tier=governance.AutonomyTier.TIER_2 if governance.is_tier2_auto_eligible(reminder.source)
+            else governance.AutonomyTier.TIER_1,
+            reminder_id=reminder.id,
+        )
+        if not gov_decision.allowed and gov_decision.requires_approval:
+            logger.info(f"Governance blocked dispatch for {reminder.id}: {gov_decision.reason}")
+            return []
+
         targets = self.store.get_targets(reminder.id)
         member_ids = self._resolve_member_ids(reminder.household_id, targets)
 
@@ -82,6 +95,13 @@ class DeliveryDispatcher:
         for mid in member_ids:
             member = self.store.get_member(mid)
             if member is None:
+                continue
+
+            # Member mute check: skip non-critical if muted
+            from dacribagents.domain.reminders.enums import UrgencyLevel  # noqa: PLC0415
+
+            if governance.is_member_muted(mid) and reminder.urgency not in {UrgencyLevel.CRITICAL, UrgencyLevel.URGENT}:
+                logger.info(f"Delivery skipped for muted member {member.name}: {governance.get_mute_reason(mid)}")
                 continue
 
             rules = self.store.get_preference_rules(reminder.household_id, member.id)

@@ -14,6 +14,7 @@ from uuid import UUID
 from dacribagents.application.ports.calendar_adapter import DateRange
 from dacribagents.application.ports.reminder_store import ReminderStore
 from dacribagents.application.services import calendar_queries as cq
+from dacribagents.application.services import governance as gov
 from dacribagents.application.use_cases import reminder_queries as rq
 from dacribagents.application.use_cases import reminder_workflows as wf
 from dacribagents.domain.reminders.enums import (
@@ -73,6 +74,27 @@ class SlackCommandHandler:
 
         if text.startswith("reject "):
             return self._handle_reject(raw_text)
+
+        if text.startswith("kill switch on") or text.startswith("kill-switch on"):
+            return self._handle_kill_switch_on()
+
+        if text.startswith("kill switch off") or text.startswith("kill-switch off"):
+            return self._handle_kill_switch_off()
+
+        if _matches(text, ["governance", "autonomy"]) and _matches(text, ["status", "summary", "tier"]):
+            return self._handle_governance_status()
+
+        if _matches(text, ["governance review", "autonomy review"]):
+            return self._handle_governance_review()
+
+        if text.startswith("mute "):
+            return self._handle_mute(text)
+
+        if text.startswith("unmute "):
+            return self._handle_unmute(text)
+
+        if _matches(text, ["muted", "muted members"]):
+            return self._handle_list_muted()
 
         if text.startswith("cancel "):
             return self._handle_cancel(text)
@@ -251,6 +273,50 @@ class SlackCommandHandler:
         return SlackResponse(text=fmt.format_explanation(expl))
 
     # ── Write command handlers ──────────────────────────────────────────
+
+    def _handle_kill_switch_on(self) -> SlackResponse:
+        gov.activate_kill_switch("Slack operator")
+        return SlackResponse(text=":octagonal_sign: *Kill switch ACTIVATED.* All autonomous actions now require approval.")
+
+    def _handle_kill_switch_off(self) -> SlackResponse:
+        gov.deactivate_kill_switch("Slack operator")
+        return SlackResponse(text=":white_check_mark: *Kill switch deactivated.* Autonomous actions resumed per tier policy.")
+
+    def _handle_governance_status(self) -> SlackResponse:
+        summary = gov.get_governance_summary(self.household_id)
+        return SlackResponse(text=fmt.format_governance_summary(summary))
+
+    def _handle_governance_review(self) -> SlackResponse:
+        review = gov.generate_review_summary(self.household_id)
+        return SlackResponse(text=fmt.format_governance_review(review))
+
+    def _handle_mute(self, text: str) -> SlackResponse:
+        name = text.removeprefix("mute ").strip()
+        member = _resolve_member(self.store, self.household_id, name)
+        if member is None:
+            return SlackResponse(text=f":x: No member found matching `{name}`.")
+        gov.mute_member(member.id, f"Muted by Slack operator for {name}")
+        return SlackResponse(text=f":mute: *{member.name}* muted for non-critical reminders.")
+
+    def _handle_unmute(self, text: str) -> SlackResponse:
+        name = text.removeprefix("unmute ").strip()
+        member = _resolve_member(self.store, self.household_id, name)
+        if member is None:
+            return SlackResponse(text=f":x: No member found matching `{name}`.")
+        gov.unmute_member(member.id)
+        return SlackResponse(text=f":loud_sound: *{member.name}* unmuted — normal delivery resumed.")
+
+    def _handle_list_muted(self) -> SlackResponse:
+        muted = gov.list_muted_members()
+        if not muted:
+            return SlackResponse(text="*Muted Members*\nNo members currently muted.")
+        lines = ["*Muted Members*\n"]
+        members = self.store.get_household_members(self.household_id)
+        name_map = {m.id: m.name for m in members}
+        for mid, reason in muted.items():
+            name = name_map.get(mid, str(mid)[:8])
+            lines.append(f":mute: *{name}*  —  {reason}")
+        return SlackResponse(text="\n".join(lines))
 
     def _handle_scheduled_next(self) -> SlackResponse:
         pairs = rq.list_scheduled_next(self.store, self.household_id)

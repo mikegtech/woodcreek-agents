@@ -277,6 +277,41 @@ def format_calendar_conflicts(
     return "\n".join(lines)
 
 
+def format_governance_summary(summary: dict) -> str:
+    """Format governance status for Slack."""
+    ks = ":octagonal_sign: ACTIVE" if summary["kill_switch_active"] else ":white_check_mark: Off"
+    lines = [
+        "*Governance Status*\n",
+        f"*Tier:* {summary['tier']} ({summary['tier_name']})",
+        f"*Kill switch:* {ks}",
+        f"*Daily budget:* {summary['daily_count']}/{summary['daily_budget']} "
+        f"({summary['budget_remaining']} remaining)",
+        f"*Recent actions:* {summary['recent_allowed']} allowed, "
+        f"{summary['recent_blocked']} blocked, "
+        f"{summary['recent_approval_required']} approval-required",
+    ]
+    if summary.get("kill_switch_activated_by"):
+        lines.append(f"*Kill switch by:* {summary['kill_switch_activated_by']}")
+    return "\n".join(lines)
+
+
+def format_governance_review(review: dict) -> str:
+    """Format a governance review summary for Slack."""
+    lines = [
+        "*Governance Review Summary*\n",
+        f"*Tier:* {review['tier']}  |  *Total actions:* {review['total_entries']}",
+        f"*Allowed:* {review['allowed']}  |  *Blocked:* {review['blocked']}  |  *Approval required:* {review['approval_required']}",
+        f"*Kill switch events:* {review['kill_switch_events']}  |  *Mute events:* {review['mute_events']}",
+        f"*Currently muted members:* {review['muted_members']}",
+        f"*Daily budget:* {review['daily_budget']}",
+    ]
+    if review.get("action_type_counts"):
+        lines.append("\n*Action breakdown:*")
+        for action, count in review["action_type_counts"].items():
+            lines.append(f"  • `{action}`: {count}")
+    return "\n".join(lines)
+
+
 def format_conflict_report(report: ConflictReport, label: str) -> str:
     """Format identity-based conflict report per member."""
     if not report.member_conflicts:

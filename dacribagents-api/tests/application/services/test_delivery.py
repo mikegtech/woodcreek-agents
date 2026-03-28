@@ -83,6 +83,18 @@ class CollectingPublisher:
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _setup_governance(household_id):
+    """Reset governance and set Tier 1 so delivery tests work."""
+    from dacribagents.application.services.governance import GovernanceState, AutonomyTier, get_governance_state
+    import dacribagents.application.services.governance as gov_mod
+
+    gov_mod._state = GovernanceState()
+    get_governance_state().set_tier(household_id, AutonomyTier.TIER_1)
+    yield
+    gov_mod._state = None
+
+
 @pytest.fixture()
 def household_id():
     return uuid4()

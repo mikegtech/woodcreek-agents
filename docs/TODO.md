@@ -235,19 +235,37 @@ Move from scheduled reminders to reactive, event-driven triggers across the agen
 - [ ] LangGraph workflow integration: reminder lifecycle as a durable LangGraph graph with checkpointing
 - [ ] Cross-agent reminder coordination
 
-### Phase 5 — Guardrailed Autonomy and Governance
+### Phase 5 — Guardrailed Autonomy and Governance (in progress)
 Allow agents limited autonomous action only after audit, approval, and guardrail infrastructure is proven.
 
-- [ ] Full audit trail review: every reminder action (create, approve, send, ack, snooze, escalate) logged with actor, timestamp, and context
-- [ ] Governance dashboard: household admins review all autonomous actions, set budgets/limits, revoke agent permissions
-- [ ] Limited autonomy tiers:
-  - Tier 1: Agent can draft reminders (human approves via Slack)
-  - Tier 2: Agent can send pre-approved reminder types without human approval (e.g., recurring maintenance reminders)
-  - Tier 3: Agent can escalate and re-route based on acknowledgement status
-- [ ] Rate limiting and anomaly detection: cap reminders per member per day, flag unusual patterns
-- [ ] Opt-out and override: any household member can mute, snooze, or opt out of non-critical reminders
-- [ ] Kill switch: household admin can disable all autonomous actions instantly via Slack or dashboard
-- [ ] Periodic governance review: monthly summary of autonomous actions for household admin
+#### Phase 5A — Governance Foundations, Autonomy Tiers, and Kill Switch ✓
+- [x] `AutonomyTier` model: Tier 0 (human approves all) → Tier 1 (delivery on approval) → Tier 2 (pre-approved auto-send) → Tier 3 (bounded autonomous escalation)
+- [x] `GovernanceState`: per-household tier, kill switch, daily budget, audit log (in-memory for MVP)
+- [x] `evaluate()`: deterministic governance decision — checks kill switch → tier → budget → returns `GovernanceDecision(allowed, requires_approval, reason)`
+- [x] Kill switch: `activate_kill_switch()` / `deactivate_kill_switch()` — blocks all Tier >= 2 actions instantly
+- [x] Budget / rate limiting: daily autonomous action cap per household (default 50), blocked when exceeded
+- [x] `GovernanceAuditEntry`: records action_type, actor_type, tier, decision, reason, reminder_id
+- [x] `get_governance_summary()`: tier, kill switch status, budget usage, recent allow/block counts
+- [x] Slack commands: `kill switch on/off`, `governance status`, `autonomy summary`
+- [x] `format_governance_summary()` Slack formatter
+- [x] Tests: 343 total (19 new) covering tier model, kill switch, budget, evaluation, audit, summary
+
+#### Phase 5B — Governance Integration and Bounded Autonomy Activation ✓
+- [x] Governance wired into `DeliveryDispatcher._dispatch_reminder()`: every dispatch calls `governance.evaluate()` before sending
+- [x] Governance wired into `escalation.check_escalations()`: autonomous escalation gated by Tier 3
+- [x] Tier 2 auto-send: `HOUSEHOLD_ROUTINE` source auto-sends without per-instance approval when household is Tier 2+
+- [x] Tier 3 autonomous escalation: fallback delivery proceeds without operator intervention when Tier 3
+- [x] Member mute/opt-out: `mute_member()` / `unmute_member()` — non-critical reminders skipped for muted members; CRITICAL/URGENT bypass mute
+- [x] Governance review summary: `generate_review_summary()` with action counts, tier, budget, mute/kill-switch events
+- [x] Slack commands: `mute <name>`, `unmute <name>`, `muted members`, `governance review`
+- [x] `format_governance_review()` Slack formatter
+- [x] Existing delivery/escalation/SMS tests updated with governance fixture (reset + tier setup)
+- [x] Tests: 358 total (15 new) covering dispatch gating, Tier 2/3 behavior, mute/bypass, escalation gating, review summary
+
+#### Phase 5 — Remaining
+- [ ] Anomaly detection: flag unusual patterns (spikes, repeated escalations)
+- [ ] Full audit trail integration: wire governance audit into the reminder audit log for unified history
+- [ ] PostgreSQL-backed governance state (replace in-memory GovernanceState)
 
 ---
 

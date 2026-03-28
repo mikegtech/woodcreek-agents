@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from dacribagents.application.ports.delivery_channel import DeliveryChannelAdapter
 from dacribagents.application.ports.event_publisher import DomainEvent, EventPublisher, NoOpEventPublisher
 from dacribagents.application.ports.reminder_store import ReminderStore
-from dacribagents.application.services import channel_policy
+from dacribagents.application.services import channel_policy, governance
 from dacribagents.domain.reminders.entities import ReminderDelivery, ReminderExecution
 from dacribagents.domain.reminders.enums import (
     DeliveryChannel,
@@ -120,6 +120,17 @@ def check_escalations(  # noqa: PLR0913
 
     reminders, _ = store.list_reminders(household_id, states=[ReminderState.DELIVERED])
     for reminder in reminders:
+        # Governance gate: check if autonomous escalation is allowed
+        gov_decision = governance.evaluate(
+            household_id=household_id,
+            action_type="auto_escalate",
+            actor_type="system",
+            requires_tier=governance.AutonomyTier.TIER_3,
+            reminder_id=reminder.id,
+        )
+        if not gov_decision.allowed:
+            continue
+
         # Determine ack timeout based on urgency
         from dacribagents.domain.reminders.enums import UrgencyLevel  # noqa: PLC0415
 
