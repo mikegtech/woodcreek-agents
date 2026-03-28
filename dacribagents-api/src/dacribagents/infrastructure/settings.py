@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "production"] = "development"
     debug: bool = False
     log_level: str = "INFO"
+    langgraph_enabled: bool = False  # Feature flag: enable LangGraph reminder lifecycle workflows
 
     # =========================================================================
     # API Server

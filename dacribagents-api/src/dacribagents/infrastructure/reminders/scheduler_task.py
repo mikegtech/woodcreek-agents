@@ -43,11 +43,15 @@ def _run_tick() -> None:
         logger.debug("Scheduler tick skipped: runtime not initialized")
         return
 
+    from dacribagents.infrastructure.settings import get_settings  # noqa: PLC0415
+
+    settings = get_settings()
     result = run_cycle(
         rt.store,
         rt.adapters,
         rt.household_id,
         events=rt.event_publisher,
+        langgraph_enabled=settings.langgraph_enabled,
     )
     if result.scheduled or result.dispatched or result.retried or result.escalated or result.digested:
         logger.info(

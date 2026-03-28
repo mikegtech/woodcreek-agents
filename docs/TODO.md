@@ -284,10 +284,29 @@ Allow agents limited autonomous action only after audit, approval, and guardrail
 - [x] `GET /health/subsystems` registered in router
 - [x] Tests: 377 total (9 new) covering runtime selection, store bridge, correlation IDs, scheduler skip, governance store import
 
-#### Production Remaining
-- [ ] Alembic migration versioning (currently using idempotent DDL — sufficient for single-deployment but needs versioning for schema evolution)
-- [ ] Docker Compose service entries for reminder subsystem
-- [ ] Production deployment runbook
+#### Phase 6B — Integration Testing, Migration Versioning, and Deployment Readiness ✓
+- [x] Integration test suite: 10 tests against real PostgreSQL via `@pytest.mark.integration` + `TEST_POSTGRES_DSN`
+- [x] E2E lifecycle test: create → submit → approve → schedule → tick → dispatch (stub) → ack via SMS reply
+- [x] Event-driven flow test: upstream event → reminder creation → dedupe → severity override
+- [x] Governance integration tests: tier gating, kill switch blocking, mute behavior, summary
+- [x] Alembic migration: `alembic.ini`, `env.py`, baseline migration `001` matching full schema
+- [x] Docker Compose: reminder environment variables added to `agents-api` service (Slack, Telnyx, SMTP, Kafka, WorkMail)
+- [x] Deployment runbook: `docs/DEPLOYMENT.md` covering config, schema, startup, health, troubleshooting, kill switch, rollback
+- [x] `.env.example` with complete variable reference
+- [x] Tests: 377 unit + 10 integration (skip without Postgres)
+
+#### Phase 7 — LangGraph Reminder Lifecycle Orchestration ✓
+- [x] `ReminderWorkflowState`: orchestration envelope (reminder_id, household_id, outcome, delivery_attempted, retry_count) — canonical state stays in PostgreSQL
+- [x] `build_reminder_graph()`: 3-node LangGraph StateGraph — evaluate_state → attempt_delivery → retry_decision, with conditional routing and END at wait states
+- [x] Wait states: graph exits to END on approval-wait, schedule-wait, ack-wait — control loop re-invokes on next tick
+- [x] Delivery node: invokes `DeliveryDispatcher.dispatch_one()` — same adapters, governance, and policy
+- [x] Retry decision: bounded (max 3), routes back to delivery or terminates
+- [x] `run_workflows()` runner: finds active reminders, invokes graph per-reminder with thread_id for checkpointing
+- [x] `run_single_workflow()`: invoke graph for a single reminder
+- [x] Control loop Phase 5: `langgraph_enabled` feature flag gates graph invocation
+- [x] Settings: `LANGGRAPH_ENABLED=false` (default off, opt-in)
+- [x] Scheduler task reads `langgraph_enabled` from settings
+- [x] Tests: 387 unit (10 new) covering graph build, wait states, approval resume, delivery, retry, rejected/cancelled terminal, runner, control loop integration
 
 ---
 
