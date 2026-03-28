@@ -196,12 +196,20 @@ Move from scheduled reminders to reactive, event-driven triggers across the agen
 - [x] Settings: `kafka_topic_events = "woodcreek.events.v1"`
 - [x] Tests: 271 total (15 new) covering event mapping, severity override, dedupe/replay, cancel+re-create, event publishing, source metadata
 
+#### Phase 4B — SMS Inbound Acknowledgment and Slack Delivery Adapter ✓
+- [x] `SlackDeliveryAdapter`: posts reminder/alert notifications to Slack channels, implements `DeliveryChannelAdapter`
+- [x] SMS inbound reply handler: bounded command parsing (OK/DONE/ACK → acknowledge, SNOOZE N → snooze, CANCEL → cancel)
+- [x] Reminder-execution correlation: sender phone → member lookup → most recent SMS delivery → reminder_id
+- [x] SMS ingest wired: Telnyx webhook → `_process_sms_event` → `handle_sms_reply()` first, fallback to general processing
+- [x] Slack visibility: `acknowledged` reminders query
+- [x] Settings: `SLACK_DELIVERY_CHANNEL` for reminder notification destination
+- [x] Tests: 297 total (26 new) covering SMS command parsing, ack/snooze/cancel via reply, correlation, Slack adapter
+
 #### Phase 4 — Remaining
 - [ ] Cross-agent reminder coordination: maintenance agent triggers reminder, compliance agent enriches it
 - [ ] Calendar write-back: approved reminders optionally sync to WorkMail calendar (via CalendarAdapter)
 - [ ] Batch/digest mode: group low-priority reminders into daily or weekly household digests
 - [ ] LangGraph workflow integration: reminder lifecycle as a durable LangGraph graph with checkpointing
-- [ ] Slack notification delivery adapter
 
 ### Phase 5 — Guardrailed Autonomy and Governance
 Allow agents limited autonomous action only after audit, approval, and guardrail infrastructure is proven.

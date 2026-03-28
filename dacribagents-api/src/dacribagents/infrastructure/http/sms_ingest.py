@@ -9,7 +9,6 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
-
 router = APIRouter()
 
 
@@ -47,9 +46,33 @@ class BatchPayload(BaseModel):
 
 
 async def _process_sms_event(event: InboundSmsEvent) -> None:
-    """Background task to process a single SMS event."""
+    """Background task to process a single SMS event.
+
+    First attempts to handle as a reminder acknowledgment/snooze/cancel
+    reply.  Falls back to the general SMS processing pipeline.
+    """
     try:
-        from dacribagents.application.use_cases.process_sms import process_sms_event
+        # Try reminder reply handling first
+        from dacribagents.application.services.sms_reply_handler import handle_sms_reply  # noqa: PLC0415
+        from dacribagents.infrastructure.slack._store import get_household_store  # noqa: PLC0415
+
+        store, _, _ = get_household_store()
+        reply_result = handle_sms_reply(
+            store,
+            from_number=event.from_number,
+            text=event.text,
+            provider_message_id=event.telnyx_message_id,
+        )
+
+        if reply_result.status != "no_match":
+            logger.info(
+                f"SMS reply handled: {event.from_number} -> {reply_result.status} ({reply_result.action})",
+                extra={"reply_result": reply_result},
+            )
+            return
+
+        # Fall back to general SMS processing
+        from dacribagents.application.use_cases.process_sms import process_sms_event  # noqa: PLC0415
 
         result = await process_sms_event(event.model_dump())
         logger.info(
@@ -71,8 +94,7 @@ async def ingest_sms_events(
     background_tasks: BackgroundTasks,
     x_sms_ingest_secret: str = Header(default="", alias="x-sms-ingest-secret"),
 ) -> dict:
-    """
-    Receive SMS events from Cloudflare Queue consumer.
+    """Receive SMS events from Cloudflare Queue consumer.
 
     This endpoint:
     1. Validates the shared secret

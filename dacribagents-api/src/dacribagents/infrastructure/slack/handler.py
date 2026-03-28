@@ -121,6 +121,9 @@ class SlackCommandHandler:
         if _matches(text, ["failed", "delivery failed"]):
             return self._handle_failed()
 
+        if _matches(text, ["acknowledged", "acked"]):
+            return self._handle_acknowledged()
+
         if _matches(text, ["event originated", "event created", "from events", "upstream"]):
             return self._handle_event_originated()
 
@@ -226,6 +229,10 @@ class SlackCommandHandler:
     def _handle_failed(self) -> SlackResponse:
         reminders = rq.list_failed_deliveries(self.store, self.household_id)
         return SlackResponse(text=fmt.format_reminder_list(reminders, "Failed Deliveries"))
+
+    def _handle_acknowledged(self) -> SlackResponse:
+        reminders = rq.list_acknowledged(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_reminder_list(reminders, "Acknowledged Reminders"))
 
     def _handle_cancel(self, text: str) -> SlackResponse:
         short_id = text.removeprefix("cancel ").strip().removeprefix("reminder ").strip()

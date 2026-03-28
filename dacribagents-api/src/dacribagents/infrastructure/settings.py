@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     # =========================================================================
     slack_bot_token: SecretStr | None = None
     slack_signing_secret: SecretStr | None = None
+    slack_delivery_channel: str = ""  # Slack channel ID for reminder delivery notifications
 
     # =========================================================================
     # Email

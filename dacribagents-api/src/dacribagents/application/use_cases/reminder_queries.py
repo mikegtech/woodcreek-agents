@@ -118,6 +118,15 @@ def list_active(
     return reminders
 
 
+def list_acknowledged(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[Reminder]:
+    """Return reminders in ACKNOWLEDGED state."""
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.ACKNOWLEDGED])
+    return reminders
+
+
 def list_event_originated(
     store: ReminderStore,
     household_id: UUID,
