@@ -1,0 +1,1 @@
+- [Project: Reminder Orchestration](project_reminder_orchestration.md) — Household reminder platform is a major phased initiative (ADR-006), Phases 0-5
