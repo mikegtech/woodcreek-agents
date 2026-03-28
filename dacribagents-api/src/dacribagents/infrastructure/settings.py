@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     kafka_sasl_mechanism: str = "PLAIN"
     kafka_topic_raw: str = "lattice.mail.raw.v1"
     kafka_topic_events: str = "woodcreek.events.v1"
+    kafka_consumer_group: str = "woodcreek-reminder-group"
 
     # =========================================================================
     # Lattice Integration

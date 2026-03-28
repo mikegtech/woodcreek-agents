@@ -4,13 +4,11 @@ Subscribes to ``woodcreek.events.v1`` (configurable), parses normalized
 event payloads, and routes them through the event-intake application
 service.
 
+Failed messages are published to a dead-letter topic (DLQ) for
+investigation rather than silently dropped.
+
 Aligned with the existing ``LatticeKafkaPublisher`` pattern: SASL_SSL,
 confluent_kafka, environment-driven configuration.
-
-Usage::
-
-    consumer = ReminderEventConsumer(store=store)
-    consumer.run(max_messages=100)  # poll up to 100 messages, then return
 """
 
 from __future__ import annotations
@@ -41,21 +39,34 @@ class ReminderEventConsumer:
         self.events = events or NoOpEventPublisher()
         self._settings = settings or get_settings()
         self.topic = topic or self._settings.kafka_topic_events
+        self.dlq_topic = f"{self.topic}.dlq"
         self._consumer = None
+        self._dlq_producer = None
 
     def _get_consumer(self):
         if self._consumer is None:
             from confluent_kafka import Consumer  # noqa: PLC0415
 
             config = self._settings.get_kafka_config()
-            config["group.id"] = "woodcreek-reminder-events"
+            config["group.id"] = self._settings.kafka_consumer_group
             config["auto.offset.reset"] = "earliest"
             config["enable.auto.commit"] = True
 
             self._consumer = Consumer(config)
             self._consumer.subscribe([self.topic])
-            logger.info(f"Kafka consumer subscribed to {self.topic}")
+            logger.info(f"Kafka consumer subscribed to {self.topic} (group={config['group.id']})")
         return self._consumer
+
+    def _get_dlq_producer(self):
+        if self._dlq_producer is None:
+            try:
+                from confluent_kafka import Producer  # noqa: PLC0415
+
+                config = self._settings.get_kafka_config()
+                self._dlq_producer = Producer(config)
+            except Exception as e:
+                logger.warning(f"DLQ producer init failed (messages will be logged only): {e}")
+        return self._dlq_producer
 
     def run(self, max_messages: int = 100, timeout: float = 1.0) -> list[IntakeResult]:
         """Poll up to *max_messages* and process them. Returns intake results."""
@@ -81,7 +92,8 @@ class ReminderEventConsumer:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            logger.error("Invalid JSON in Kafka message")
+            logger.error("Invalid JSON in Kafka message — sending to DLQ")
+            self._send_to_dlq(raw, "invalid_json")
             return None
 
         try:
@@ -97,13 +109,32 @@ class ReminderEventConsumer:
                 metadata=data.get("metadata", {}),
             )
         except (KeyError, ValueError) as e:
-            logger.error(f"Invalid event payload: {e}")
+            logger.error(f"Invalid event payload: {e} — sending to DLQ")
+            self._send_to_dlq(raw, f"invalid_payload: {e}")
             return None
 
         return process_upstream_event(self.store, event, self.events)
 
+    def _send_to_dlq(self, raw: bytes, reason: str) -> None:
+        """Publish a failed message to the dead-letter topic."""
+        producer = self._get_dlq_producer()
+        if producer is None:
+            logger.warning(f"DLQ unavailable — dropped message (reason: {reason})")
+            return
+
+        headers = [("dlq_reason", reason.encode())]
+        try:
+            producer.produce(topic=self.dlq_topic, value=raw, headers=headers)
+            producer.flush(timeout=5)
+            logger.info(f"Message sent to DLQ {self.dlq_topic}: {reason}")
+        except Exception as e:
+            logger.error(f"DLQ publish failed: {e}")
+
     def close(self) -> None:
-        """Close the consumer."""
+        """Close the consumer and DLQ producer."""
         if self._consumer:
             self._consumer.close()
             self._consumer = None
+        if self._dlq_producer:
+            self._dlq_producer.flush(timeout=5)
+            self._dlq_producer = None
