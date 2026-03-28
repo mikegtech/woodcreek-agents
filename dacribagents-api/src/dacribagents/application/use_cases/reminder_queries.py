@@ -118,6 +118,17 @@ def list_active(
     return reminders
 
 
+def list_digest_eligible(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[Reminder]:
+    """Return PENDING_DELIVERY reminders eligible for digest aggregation."""
+    from dacribagents.application.services.digest import is_digest_eligible  # noqa: PLC0415
+
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.PENDING_DELIVERY])
+    return [r for r in reminders if is_digest_eligible(r)]
+
+
 def list_acknowledged(
     store: ReminderStore,
     household_id: UUID,

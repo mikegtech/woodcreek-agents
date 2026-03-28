@@ -131,6 +131,9 @@ class SlackCommandHandler:
         if _matches(text, ["acknowledged", "acked"]):
             return self._handle_acknowledged()
 
+        if _matches(text, ["digest"]) and _matches(text, ["pending", "eligible", "next"]):
+            return self._handle_digest_pending()
+
         if _matches(text, ["event originated", "event created", "from events", "upstream"]):
             return self._handle_event_originated()
 
@@ -272,6 +275,12 @@ class SlackCommandHandler:
     def _handle_acknowledged(self) -> SlackResponse:
         reminders = rq.list_acknowledged(self.store, self.household_id)
         return SlackResponse(text=fmt.format_reminder_list(reminders, "Acknowledged Reminders"))
+
+    def _handle_digest_pending(self) -> SlackResponse:
+        reminders = rq.list_digest_eligible(self.store, self.household_id)
+        if not reminders:
+            return SlackResponse(text="*Digest Queue*\nNo reminders pending for digest.")
+        return SlackResponse(text=fmt.format_reminder_list(reminders, "Pending Digest Items"))
 
     def _handle_cancel(self, text: str) -> SlackResponse:
         short_id = text.removeprefix("cancel ").strip().removeprefix("reminder ").strip()

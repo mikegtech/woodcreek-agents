@@ -218,9 +218,20 @@ Move from scheduled reminders to reactive, event-driven triggers across the agen
 - [x] Settings: `WORKMAIL_EWS_EMAIL`, `WORKMAIL_EWS_PASSWORD`, `WORKMAIL_EWS_REGION`
 - [x] Tests: 308 total (11 new) covering identity resolution, free/busy, free window finding, conflicts, overlap detection, context enrichment
 
+#### Phase 4D — Digest Mode and Aggregation ✓
+- [x] Digest eligibility: `intent == DIGEST` or (`urgency == LOW` and `intent != ALERT`); urgent/critical never digested
+- [x] `collect_eligible()`: finds PENDING_DELIVERY reminders matching digest rules
+- [x] `generate_and_deliver()`: aggregates eligible reminders → formatted HTML+text email → delivers via email adapter → marks each DELIVERED
+- [x] `DigestBatch` record: id, household_id, generated_at, reminder_ids, recipient_emails, delivered, delivery_error
+- [x] Control loop integration: digest generation runs as Phase 4 of `run_cycle()` when email adapter is available
+- [x] No duplicate digesting: DELIVERED reminders are excluded on next collection
+- [x] Slack visibility: `pending digest` / `digest eligible` query command
+- [x] `list_digest_eligible()` query
+- [x] Domain events: `digest.delivered`, `digest.delivery_failed`
+- [x] Tests: 324 total (16 new) covering eligibility (6), collection (2), delivery (5), dedup (1), events (1), query (1)
+
 #### Phase 4 — Remaining
 - [ ] Calendar write-back: approved reminders optionally sync to WorkMail calendar (via CalendarAdapter)
-- [ ] Batch/digest mode: group low-priority reminders into daily or weekly household digests
 - [ ] LangGraph workflow integration: reminder lifecycle as a durable LangGraph graph with checkpointing
 - [ ] Cross-agent reminder coordination
 

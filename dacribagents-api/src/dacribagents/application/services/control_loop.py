@@ -28,7 +28,7 @@ from loguru import logger
 from dacribagents.application.ports.delivery_channel import DeliveryChannelAdapter
 from dacribagents.application.ports.event_publisher import EventPublisher, NoOpEventPublisher
 from dacribagents.application.ports.reminder_store import ReminderStore
-from dacribagents.application.services import escalation
+from dacribagents.application.services import digest, escalation
 from dacribagents.application.services.delivery import DeliveryDispatcher
 from dacribagents.application.services.scheduler import tick
 from dacribagents.domain.reminders.enums import DeliveryChannel
@@ -42,6 +42,7 @@ class CycleResult:
     dispatched: int = 0
     retried: int = 0
     escalated: int = 0
+    digested: int = 0
 
 
 def run_cycle(
@@ -75,9 +76,19 @@ def run_cycle(
     if escalated:
         logger.info(f"Control loop: {len(escalated)} reminders escalated")
 
+    # Phase 4: Digest — batch eligible low-priority reminders
+    email_adapter = adapters.get(DeliveryChannel.EMAIL)
+    digested = 0
+    if email_adapter:
+        batch = digest.generate_and_deliver(store, household_id, email_adapter, events=publisher, now=now)
+        if batch:
+            digested = len(batch.reminder_ids)
+            logger.info(f"Control loop: digest generated with {digested} items")
+
     return CycleResult(
         scheduled=len(executions),
         dispatched=len(deliveries),
         retried=len(retried),
         escalated=len(escalated),
+        digested=digested,
     )
