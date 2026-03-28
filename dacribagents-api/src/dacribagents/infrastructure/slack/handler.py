@@ -121,7 +121,10 @@ class SlackCommandHandler:
         if _matches(text, ["failed", "delivery failed"]):
             return self._handle_failed()
 
-        if _matches(text, ["explain", "why"]) and _matches(text, ["approval", "reminder", "blocked"]):
+        if _matches(text, ["deferred", "quiet hours", "suppressed"]):
+            return self._handle_deferred()
+
+        if _matches(text, ["explain", "why"]) and _matches(text, ["approval", "reminder", "blocked", "not sent"]):
             return self._handle_explain(text)
 
         if _matches(text, ["reminder"]):
@@ -174,6 +177,17 @@ class SlackCommandHandler:
             schedule_description=parsed.get("schedule"),
         )
         return SlackResponse(text=fmt.format_draft_preview(preview))
+
+    def _handle_deferred(self) -> SlackResponse:
+        """Show reminders that were deferred (quiet hours, suppressed)."""
+        # In the current model, deferred reminders stay in PENDING_DELIVERY
+        # with suppressed deliveries. Show pending + any with quiet hours notes.
+        reminders = rq.list_pending_delivery(self.store, self.household_id)
+        if not reminders:
+            return SlackResponse(text="*Deferred Reminders*\nNone currently deferred.")
+        return SlackResponse(
+            text=fmt.format_reminder_list(reminders, "Reminders Pending (possibly deferred due to quiet hours)")
+        )
 
     def _handle_explain(self, text: str) -> SlackResponse:
         pending = rq.list_pending_approval(self.store, self.household_id)

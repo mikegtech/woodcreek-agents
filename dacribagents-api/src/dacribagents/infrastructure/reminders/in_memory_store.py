@@ -142,6 +142,11 @@ class InMemoryReminderStore:
         return delivery
 
     def update_delivery(self, delivery: ReminderDelivery) -> ReminderDelivery:
+        exec_deliveries = self.deliveries.get(delivery.execution_id, [])
+        for i, d in enumerate(exec_deliveries):
+            if d.id == delivery.id:
+                exec_deliveries[i] = delivery
+                break
         return delivery
 
     def get_deliveries_for_execution(self, execution_id: UUID) -> list[ReminderDelivery]:

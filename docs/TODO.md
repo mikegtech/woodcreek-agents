@@ -166,12 +166,18 @@ Wire reminders to real outbound channels and support household/group dynamics.
 - [x] SMTP settings: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`
 - [x] Tests: 236 total (16 new) covering dispatch, channel selection, ack, failure handling, event publishing
 
+#### Phase 3B — Escalation, Retry, PreferenceRule Engine, and Scheduling Driver ✓
+- [x] `PreferenceRule` integration: `select_channel()` consults stored rules with 4-level precedence (member+urgency → member default → household+urgency → household default)
+- [x] Quiet hours enforcement: non-critical reminders deferred during member quiet window; CRITICAL and `quiet_hours_override` rules bypass
+- [x] Delivery retry with bounded exponential backoff: `2^attempt * base_delay`, capped at 30min, max 3 retries, retriable vs non-retriable failure detection
+- [x] Escalation: re-deliver via fallback channel after ack timeout (2hr normal, 30min urgent), escalate to alternate member, max 2 escalation steps, publishes `reminder.escalation_triggered` event
+- [x] Control-loop driver: `run_cycle()` executes schedule → dispatch → retry → escalate in one tick; `POST /internal/scheduler/tick` endpoint
+- [x] Slack visibility: `deferred`/`quiet hours` query, updated help text
+- [x] Fixed `InMemoryReminderStore.update_delivery` (was no-op, now persists status changes)
+- [x] Tests: 256 total (20 new) covering preference resolution, quiet hours, backoff, retry/escalation, control loop
+
 #### Phase 3 — Remaining
 - [ ] Slack notification delivery adapter
-- [ ] `PreferenceRule` engine integration with channel policy
-- [ ] Quiet hours enforcement in channel selection
-- [ ] Delivery retry with backoff
-- [ ] Escalation: if no ack within window, re-deliver via fallback channel or escalate to another member
 - [ ] Batch/digest mode: group low-priority reminders into daily/weekly household digests
 
 ### Phase 4 — Event-Driven Household Orchestration

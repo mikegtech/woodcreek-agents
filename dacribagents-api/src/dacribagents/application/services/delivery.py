@@ -84,6 +84,9 @@ class DeliveryDispatcher:
             if member is None:
                 continue
 
+            rules = self.store.get_preference_rules(reminder.household_id, member.id)
+
+            now_time = datetime.now(UTC).time()
             selection = channel_policy.select_channel(
                 member_id=member.id,
                 phone=member.phone,
@@ -91,6 +94,10 @@ class DeliveryDispatcher:
                 slack_id=member.slack_id,
                 urgency=reminder.urgency,
                 intent=reminder.intent,
+                preference_rules=rules,
+                quiet_hours_start=member.quiet_hours_start,
+                quiet_hours_end=member.quiet_hours_end,
+                current_time=now_time,
             )
 
             if selection.suppressed:
