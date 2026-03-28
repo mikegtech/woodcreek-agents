@@ -8,12 +8,14 @@ operator surfaces consume.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from dacribagents.application.ports.calendar_adapter import CalendarEvent, DateRange
 from dacribagents.application.ports.reminder_store import ReminderStore
 from dacribagents.domain.reminders.entities import (
     Reminder,
+    ReminderDelivery,
     ReminderSchedule,
     ReminderTarget,
 )
@@ -22,6 +24,7 @@ from dacribagents.domain.reminders.enums import (
     NotificationIntent,
     ReminderSource,
     ReminderState,
+    ScheduleType,
     TargetType,
     UrgencyLevel,
 )
@@ -115,6 +118,38 @@ def list_active(
     return reminders
 
 
+def list_delivered(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[Reminder]:
+    """Return reminders in DELIVERED state."""
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.DELIVERED])
+    return reminders
+
+
+def list_failed_deliveries(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[Reminder]:
+    """Return reminders in FAILED state."""
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.FAILED])
+    return reminders
+
+
+def get_delivery_details(
+    store: ReminderStore,
+    reminder_id: UUID,
+) -> list[ReminderDelivery]:
+    """Return all delivery attempts for a reminder's executions."""
+    # Collect deliveries across all executions for this reminder
+    all_deliveries: list[ReminderDelivery] = []
+    # The store tracks deliveries by execution_id, so we look at all executions
+    for exec_id, execution in getattr(store, "executions", {}).items():
+        if execution.reminder_id == reminder_id:
+            all_deliveries.extend(store.get_deliveries_for_execution(exec_id))
+    return all_deliveries
+
+
 def explain_reminder(
     store: ReminderStore,
     reminder_id: UUID,
@@ -182,6 +217,45 @@ def preview_draft(  # noqa: PLR0913
         approval_reason=approval_reason,
         notes=notes,
     )
+
+
+def list_scheduled_next(
+    store: ReminderStore,
+    household_id: UUID,
+    limit: int = 10,
+) -> list[tuple[Reminder, ReminderSchedule | None]]:
+    """Return the next N scheduled reminders ordered by next_fire_at."""
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.SCHEDULED])
+    pairs = []
+    for r in reminders:
+        sched = store.get_schedule(r.id)
+        pairs.append((r, sched))
+    # Sort by next_fire_at, nulls last
+    pairs.sort(key=lambda p: p[1].next_fire_at if p[1] and p[1].next_fire_at else datetime.max)
+    return pairs[:limit]
+
+
+def list_recurring(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[tuple[Reminder, ReminderSchedule]]:
+    """Return all active recurring reminders with their schedules."""
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.SCHEDULED])
+    result = []
+    for r in reminders:
+        sched = store.get_schedule(r.id)
+        if sched and sched.schedule_type == ScheduleType.RECURRING:
+            result.append((r, sched))
+    return result
+
+
+def list_pending_delivery(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[Reminder]:
+    """Return reminders that have reached pending_delivery state."""
+    reminders, _ = store.list_reminders(household_id, states=[ReminderState.PENDING_DELIVERY])
+    return reminders
 
 
 def build_schedule_summary(

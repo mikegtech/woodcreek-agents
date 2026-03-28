@@ -108,10 +108,15 @@ class Settings(BaseSettings):
     slack_signing_secret: SecretStr | None = None
 
     # =========================================================================
-    # Email Worker
+    # Email
     # =========================================================================
     email_poll_minutes: int = 5
     workmail_mailboxes: str = "agents"  # comma-separated: agents,solar,hoa
+    smtp_host: str = "smtp.mail.us-east-1.awsapps.com"
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: SecretStr = Field(default=SecretStr(""))
+    smtp_from_address: str = "reminders@woodcreek.me"
 
     # =========================================================================
     # Observability

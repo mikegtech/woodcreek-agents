@@ -8,9 +8,11 @@ from uuid import uuid4
 import pytest
 
 from dacribagents.application.ports.calendar_adapter import CalendarEvent, DateRange
-from dacribagents.application.use_cases.reminder_workflows import create_reminder
+from dacribagents.application.use_cases.reminder_workflows import create_reminder, schedule_reminder
+from dacribagents.domain.reminders.entities import HouseholdMember
 from dacribagents.domain.reminders.enums import (
     CalendarProviderType,
+    MemberRole,
     NotificationIntent,
     ReminderSource,
     ReminderState,
@@ -22,6 +24,7 @@ from dacribagents.domain.reminders.models import (
     CreateReminderRequest,
     ReminderScheduleInput,
     ReminderTargetInput,
+    ScheduleReminderRequest,
 )
 from dacribagents.infrastructure.calendar.mock_adapter import MockCalendarAdapter
 from dacribagents.infrastructure.reminders.in_memory_store import InMemoryReminderStore
@@ -290,6 +293,79 @@ def test_pending_approval_shows_short_ids(handler, store, household_id, member_i
         submit_for_approval(store, r.id, SubmitForApprovalRequest(actor_id=member_id))
 
     resp = handler.handle("<@U123> show reminders waiting for approval")
-    # Should contain short IDs for actionability
     assert "approve" in resp.text.lower()
     assert "reject" in resp.text.lower()
+
+
+# ── Cancel and snooze via Slack ─────────────────────────────────────────────
+
+
+def test_cancel_reminder(handler, store, household_id, member_id):
+    _seed_reminders(store, household_id, member_id)
+    scheduled = [r for r in store.reminders.values() if r.state == ReminderState.SCHEDULED]
+    assert len(scheduled) > 0
+    short_id = str(scheduled[0].id)[:8]
+    resp = handler.handle(f"<@U123> cancel {short_id}")
+    assert "cancelled" in resp.text.lower()
+
+
+def test_snooze_not_delivered_fails(handler, store, household_id, member_id):
+    _seed_reminders(store, household_id, member_id)
+    draft = [r for r in store.reminders.values() if r.state == ReminderState.DRAFT]
+    if draft:
+        short_id = str(draft[0].id)[:8]
+        resp = handler.handle(f"<@U123> snooze {short_id}")
+        assert "Cannot snooze" in resp.text
+
+
+# ── Per-member targeting ────────────────────────────────────────────────────
+
+
+def test_remind_specific_member(handler, store, household_id, member_id):
+    # Seed a household member named "Mike"
+    mike = HouseholdMember(
+        id=member_id,
+        household_id=household_id,
+        name="Mike",
+        role=MemberRole.ADMIN,
+        timezone="America/Chicago",
+        created_at=datetime(2026, 1, 1),
+    )
+    store.members[mike.id] = mike
+
+    resp = handler.handle("<@U123> remind Mike about dentist appointment")
+    assert "created" in resp.text.lower() or "Reminder created" in resp.text
+    # Check that the target is individual
+    reminders, _ = store.list_reminders(household_id)
+    found = [r for r in reminders if "dentist" in r.subject.lower()]
+    assert len(found) == 1
+    targets = store.get_targets(found[0].id)
+    assert any(t.target_type == TargetType.INDIVIDUAL for t in targets)
+
+
+# ── Scheduling queries ──────────────────────────────────────────────────────
+
+
+def test_scheduled_reminders_query(handler, store, household_id, member_id):
+    _seed_reminders(store, household_id, member_id)
+    resp = handler.handle("<@U123> show scheduled reminders")
+    assert "Scheduled" in resp.text or "scheduled" in resp.text
+
+
+def test_recurring_query(handler, store, household_id, member_id):
+    # Create a recurring reminder
+    reminder = create_reminder(
+        store, household_id, member_id,
+        CreateReminderRequest(subject="Weekly trash", targets=[_target()]),
+    )
+    schedule_reminder(
+        store, reminder.id,
+        ScheduleReminderRequest(
+            schedule=ReminderScheduleInput(
+                schedule_type=ScheduleType.RECURRING,
+                cron_expression="0 7 * * WED",
+            ),
+        ),
+    )
+    resp = handler.handle("<@U123> show recurring reminders")
+    assert "Weekly trash" in resp.text or "Recurring" in resp.text

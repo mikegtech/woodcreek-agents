@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -79,6 +80,14 @@ class ReminderStore(Protocol):
 
     def get_schedule(self, reminder_id: UUID) -> ReminderSchedule | None:  # noqa: D102
         ...
+
+    def update_schedule(self, schedule: ReminderSchedule) -> ReminderSchedule:  # noqa: D102
+        ...
+
+    def list_due_reminders(  # noqa: D102
+        self,
+        now: datetime,
+    ) -> list[tuple[Reminder, ReminderSchedule]]: ...
 
     # ── Executions & Deliveries ─────────────────────────────────────────
 

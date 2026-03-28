@@ -29,11 +29,14 @@ class SlackClient:
         channel: str,
         text: str,
         thread_ts: str | None = None,
+        blocks: list[dict] | None = None,
     ) -> dict:
-        """Post a message to a Slack channel, optionally in a thread."""
+        """Post a message to a Slack channel, optionally with Block Kit blocks."""
         payload: dict = {"channel": channel, "text": text}
         if thread_ts:
             payload["thread_ts"] = thread_ts
+        if blocks:
+            payload["blocks"] = blocks
 
         async with httpx.AsyncClient(timeout=10) as http:
             resp = await http.post(
@@ -47,6 +50,33 @@ class SlackClient:
         data = resp.json()
         if not data.get("ok"):
             logger.error(f"Slack API error: {data.get('error')}")
+        return data
+
+    async def update_message(
+        self,
+        *,
+        channel: str,
+        ts: str,
+        text: str,
+        blocks: list[dict] | None = None,
+    ) -> dict:
+        """Update an existing Slack message (e.g., after button click)."""
+        payload: dict = {"channel": channel, "ts": ts, "text": text}
+        if blocks:
+            payload["blocks"] = blocks
+
+        async with httpx.AsyncClient(timeout=10) as http:
+            resp = await http.post(
+                f"{_BASE_URL}/chat.update",
+                headers={
+                    "Authorization": f"Bearer {self.bot_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        data = resp.json()
+        if not data.get("ok"):
+            logger.error(f"Slack chat.update error: {data.get('error')}")
         return data
 
 

@@ -51,6 +51,7 @@ dependencies = [
     "pypdf>=6.4.2",
     "confluent-kafka>=2.3.0",
     "einops>=0.8.1",
+    "croniter>=2.0.0",
 ]
 
 [dependency-groups]

@@ -8,7 +8,7 @@ from dacribagents.application.use_cases.reminder_queries import (
     ReminderExplanation,
     ScheduleSummary,
 )
-from dacribagents.domain.reminders.entities import Reminder
+from dacribagents.domain.reminders.entities import Reminder, ReminderSchedule
 from dacribagents.domain.reminders.enums import NotificationIntent, UrgencyLevel
 
 # ── Urgency / intent labels ─────────────────────────────────────────────────
@@ -138,6 +138,99 @@ def format_draft_preview(preview: DraftPreview) -> str:
         for note in preview.notes:
             lines.append(f"  • {note}")
     return "\n".join(lines)
+
+
+def format_scheduled_list(pairs: list[tuple[Reminder, ReminderSchedule | None]]) -> str:
+    """Format upcoming scheduled reminders with next fire time."""
+    if not pairs:
+        return "*Upcoming Scheduled Reminders*\nNone scheduled."
+
+    lines = [f"*Upcoming Scheduled Reminders* ({len(pairs)} items)\n"]
+    for r, sched in pairs:
+        icon = _URGENCY_ICON.get(r.urgency, ":bell:")
+        short_id = str(r.id)[:8]
+        fire_str = _format_fire_time(sched)
+        stype = sched.schedule_type.value if sched else "?"
+        lines.append(f"{icon} `{short_id}` *{r.subject}*  |  {fire_str}  |  _{stype}_")
+    return "\n".join(lines)
+
+
+def format_recurring_list(pairs: list[tuple[Reminder, ReminderSchedule]]) -> str:
+    """Format active recurring reminders."""
+    if not pairs:
+        return "*Recurring Reminders*\nNone active."
+
+    lines = [f"*Recurring Reminders* ({len(pairs)} items)\n"]
+    for r, sched in pairs:
+        icon = _URGENCY_ICON.get(r.urgency, ":bell:")
+        short_id = str(r.id)[:8]
+        fire_str = _format_fire_time(sched)
+        lines.append(f"{icon} `{short_id}` *{r.subject}*  |  `{sched.cron_expression}`  |  next: {fire_str}")
+    return "\n".join(lines)
+
+
+def format_approval_buttons(reminder: Reminder) -> list[dict]:
+    """Build Slack Block Kit action buttons for a pending-approval reminder."""
+    short_id = str(reminder.id)[:8]
+    return [
+        {
+            "type": "actions",
+            "block_id": f"approval_{short_id}",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve"},
+                    "style": "primary",
+                    "action_id": "approve_reminder",
+                    "value": str(reminder.id),
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Reject"},
+                    "style": "danger",
+                    "action_id": "reject_reminder",
+                    "value": str(reminder.id),
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Cancel"},
+                    "action_id": "cancel_reminder",
+                    "value": str(reminder.id),
+                },
+            ],
+        },
+    ]
+
+
+def format_management_buttons(reminder: Reminder) -> list[dict]:
+    """Build Slack Block Kit action buttons for managing a delivered reminder."""
+    return [
+        {
+            "type": "actions",
+            "block_id": f"manage_{str(reminder.id)[:8]}",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Snooze 30m"},
+                    "action_id": "snooze_reminder",
+                    "value": str(reminder.id),
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Cancel"},
+                    "style": "danger",
+                    "action_id": "cancel_reminder",
+                    "value": str(reminder.id),
+                },
+            ],
+        },
+    ]
+
+
+def _format_fire_time(sched: ReminderSchedule | None) -> str:
+    if not sched or not sched.next_fire_at:
+        return "no fire time"
+    return sched.next_fire_at.strftime("%Y-%m-%d %H:%M")
 
 
 def format_schedule_summary(summary: ScheduleSummary) -> str:

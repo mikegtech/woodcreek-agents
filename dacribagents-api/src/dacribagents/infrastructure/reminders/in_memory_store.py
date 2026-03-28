@@ -117,6 +117,20 @@ class InMemoryReminderStore:
     def get_schedule(self, reminder_id: UUID) -> ReminderSchedule | None:
         return self.schedules.get(reminder_id)
 
+    def update_schedule(self, schedule: ReminderSchedule) -> ReminderSchedule:
+        self.schedules[schedule.reminder_id] = schedule
+        return schedule
+
+    def list_due_reminders(self, now: datetime) -> list[tuple]:
+        results = []
+        for r in self.reminders.values():
+            if r.state != ReminderState.SCHEDULED:
+                continue
+            sched = self.schedules.get(r.id)
+            if sched and sched.next_fire_at and sched.next_fire_at <= now:
+                results.append((r, sched))
+        return results
+
     # ── Executions & Deliveries ─────────────────────────────────────────
 
     def create_execution(self, execution: ReminderExecution) -> ReminderExecution:

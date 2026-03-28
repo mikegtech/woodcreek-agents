@@ -16,6 +16,7 @@ from dacribagents.application.ports.reminder_store import ReminderStore
 from dacribagents.application.use_cases import reminder_queries as rq
 from dacribagents.application.use_cases import reminder_workflows as wf
 from dacribagents.domain.reminders.enums import (
+    AckMethod,
     NotificationIntent,
     ReminderSource,
     ReminderState,
@@ -28,6 +29,7 @@ from dacribagents.domain.reminders.models import (
     CreateReminderRequest,
     RejectReminderRequest,
     ReminderTargetInput,
+    SnoozeReminderRequest,
     SubmitForApprovalRequest,
 )
 from dacribagents.infrastructure.calendar.mock_adapter import MockCalendarAdapter
@@ -60,7 +62,7 @@ class SlackCommandHandler:
         self.household_id = household_id or UUID("00000000-0000-0000-0000-000000000001")
         self.actor_id = actor_id or self.household_id
 
-    def handle(self, raw_text: str) -> SlackResponse:  # noqa: PLR0911
+    def handle(self, raw_text: str) -> SlackResponse:  # noqa: PLR0911, PLR0912
         """Parse a Slack message and return a formatted response."""
         text = _strip_mention(raw_text).strip().lower()
 
@@ -71,7 +73,18 @@ class SlackCommandHandler:
         if text.startswith("reject "):
             return self._handle_reject(raw_text)
 
-        if _matches(text, ["create"]) and _matches(text, ["reminder"]):
+        if text.startswith("cancel "):
+            return self._handle_cancel(text)
+
+        if text.startswith("snooze "):
+            return self._handle_snooze(text)
+
+        # "create a reminder ..." — explicit create command
+        if text.startswith("create ") and "reminder" in text:
+            return self._handle_create(raw_text)
+
+        # "remind Mike about ..." — per-member targeting
+        if re.match(r"remind\s+\w+\s+about\s+", text):
             return self._handle_create(raw_text)
 
         # ── Read commands ───────────────────────────────────────────────
@@ -93,6 +106,21 @@ class SlackCommandHandler:
         if _matches(text, ["draft"]) and _matches(text, ["reminder"]):
             return self._handle_draft_preview(raw_text)
 
+        if _matches(text, ["scheduled", "next", "upcoming"]) and _matches(text, ["reminder"]):
+            return self._handle_scheduled_next()
+
+        if _matches(text, ["recurring"]):
+            return self._handle_recurring()
+
+        if _matches(text, ["pending delivery", "pending_delivery", "ready to send"]):
+            return self._handle_pending_delivery()
+
+        if _matches(text, ["delivered today", "sent today", "what was delivered", "what was sent"]):
+            return self._handle_delivered()
+
+        if _matches(text, ["failed", "delivery failed"]):
+            return self._handle_failed()
+
         if _matches(text, ["explain", "why"]) and _matches(text, ["approval", "reminder", "blocked"]):
             return self._handle_explain(text)
 
@@ -102,8 +130,9 @@ class SlackCommandHandler:
         return SlackResponse(
             text=(
                 "I can help with reminders, alerts, calendar, and household scheduling.\n"
-                "Try: `pending approvals`, `active alerts`, `what does tomorrow look like?`, "
-                "`create a reminder for the family about ...`, `approve <id>`, `reject <id> <reason>`"
+                "Try: `pending approvals`, `active alerts`, `scheduled reminders`, `recurring`,\n"
+                "`create a reminder for the family about ...`, `remind Mike about ...`,\n"
+                "`approve <id>`, `reject <id> <reason>`, `cancel <id>`, `snooze <id>`"
             ),
         )
 
@@ -157,10 +186,85 @@ class SlackCommandHandler:
 
     # ── Write command handlers ──────────────────────────────────────────
 
+    def _handle_scheduled_next(self) -> SlackResponse:
+        pairs = rq.list_scheduled_next(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_scheduled_list(pairs))
+
+    def _handle_recurring(self) -> SlackResponse:
+        pairs = rq.list_recurring(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_recurring_list(pairs))
+
+    def _handle_pending_delivery(self) -> SlackResponse:
+        reminders = rq.list_pending_delivery(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_reminder_list(reminders, "Pending Delivery"))
+
+    def _handle_delivered(self) -> SlackResponse:
+        reminders = rq.list_delivered(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_reminder_list(reminders, "Delivered Reminders"))
+
+    def _handle_failed(self) -> SlackResponse:
+        reminders = rq.list_failed_deliveries(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_reminder_list(reminders, "Failed Deliveries"))
+
+    def _handle_cancel(self, text: str) -> SlackResponse:
+        short_id = text.removeprefix("cancel ").strip().removeprefix("reminder ").strip()
+        reminder = _find_by_short_id(self.store, self.household_id, short_id)
+        if reminder is None:
+            return SlackResponse(text=f":x: No reminder found matching `{short_id}`.")
+        try:
+            result = wf.cancel_reminder(self.store, reminder.id)
+            return SlackResponse(text=fmt.format_approval_action(result, "cancelled"))
+        except InvalidTransitionError:
+            return SlackResponse(
+                text=f":x: Cannot cancel *{reminder.subject}* — current state is `{reminder.state.value}`."
+            )
+
+    def _handle_snooze(self, text: str) -> SlackResponse:
+        """Snooze a delivered reminder. Usage: snooze <id> [minutes]."""
+        parts = text.removeprefix("snooze ").strip().split(None, 1)
+        short_id = parts[0] if parts else ""
+        minutes = 30  # default
+        if len(parts) > 1:
+            try:
+                minutes = int(parts[1].removesuffix("m").removesuffix("min").removesuffix("minutes").strip())
+            except ValueError:
+                pass
+
+        reminder = _find_by_short_id(self.store, self.household_id, short_id)
+        if reminder is None:
+            return SlackResponse(text=f":x: No reminder found matching `{short_id}`.")
+        try:
+            snooze_until = datetime.now(tz=_TZ) + timedelta(minutes=minutes)
+            result = wf.snooze_reminder(
+                self.store, reminder.id,
+                SnoozeReminderRequest(
+                    member_id=self.actor_id,
+                    method=AckMethod.SLACK_BUTTON,
+                    snooze_until=snooze_until,
+                ),
+            )
+            return SlackResponse(text=f":zzz: *{result.subject}* snoozed for {minutes} minutes.")
+        except InvalidTransitionError:
+            return SlackResponse(
+                text=f":x: Cannot snooze *{reminder.subject}* — current state is `{reminder.state.value}`."
+            )
+
     def _handle_create(self, raw_text: str) -> SlackResponse:
         """Create a reminder draft and auto-submit for approval if needed."""
         parsed = _parse_draft_intent(raw_text)
-        target_type = TargetType.HOUSEHOLD if parsed.get("household") else TargetType.INDIVIDUAL
+
+        # Per-member targeting: resolve "remind Mike about..." to member_id
+        member_name = parsed.get("member_name")
+        if member_name:
+            member = _resolve_member(self.store, self.household_id, member_name)
+            if member:
+                target = ReminderTargetInput(target_type=TargetType.INDIVIDUAL, member_id=member.id)
+            else:
+                target = ReminderTargetInput(target_type=TargetType.HOUSEHOLD)
+        elif parsed.get("household"):
+            target = ReminderTargetInput(target_type=TargetType.HOUSEHOLD)
+        else:
+            target = ReminderTargetInput(target_type=TargetType.HOUSEHOLD)
 
         try:
             reminder = wf.create_reminder(
@@ -170,10 +274,7 @@ class SlackCommandHandler:
                 CreateReminderRequest(
                     subject=parsed["subject"],
                     source=ReminderSource.USER,
-                    targets=[ReminderTargetInput(
-                        target_type=target_type,
-                        member_id=self.actor_id if target_type == TargetType.INDIVIDUAL else None,
-                    )],
+                    targets=[target],
                 ),
             )
 
@@ -312,6 +413,17 @@ def _parse_draft_intent(raw_text: str) -> dict:
 
     household = any(kw in raw_text.lower() for kw in ["family", "household", "everyone"])
 
+    # Per-member targeting: "remind Mike about ..."
+    member_name = None
+    member_match = re.search(
+        r"(?:remind|create a reminder for)\s+([A-Z][a-z]+)\s+about\s+",
+        _strip_mention(raw_text),
+    )
+    if member_match and member_match.group(1).lower() not in {"the", "a", "my"}:
+        name = member_match.group(1)
+        if name.lower() not in {"family", "household", "everyone"}:
+            member_name = name
+
     # Look for "at <time>" schedule hint
     schedule = None
     at_match = re.search(r"\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b", text, re.IGNORECASE)
@@ -324,7 +436,21 @@ def _parse_draft_intent(raw_text: str) -> dict:
         subject = text[: at_match.start()].strip().rstrip(",")
     subject = subject.strip() or "Untitled reminder"
 
-    return {"subject": subject, "household": household, "schedule": schedule}
+    return {"subject": subject, "household": household, "schedule": schedule, "member_name": member_name}
+
+
+def _resolve_member(
+    store: ReminderStore,
+    household_id: UUID,
+    name: str,
+) -> object | None:
+    """Resolve a member name to a HouseholdMember (case-insensitive)."""
+    members = store.get_household_members(household_id)
+    name_lower = name.lower()
+    for m in members:
+        if m.name.lower() == name_lower:
+            return m
+    return None
 
 
 def _find_by_short_id(

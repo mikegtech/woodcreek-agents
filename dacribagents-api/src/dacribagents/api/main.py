@@ -76,12 +76,14 @@ def create_app() -> FastAPI:
     from dacribagents.infrastructure.agentic_rag.routes_combined import router as combined_router
     from dacribagents.infrastructure.agentic_rag.milvus_routes import router as milvus_router
     from dacribagents.infrastructure.http.slack_ingest import router as slack_router
+    from dacribagents.infrastructure.http.slack_interactions import router as slack_interactions_router
     from dacribagents.infrastructure.ragas import evaluation_router
 
 
     app.include_router(router)
     app.include_router(sms_router)
     app.include_router(slack_router)
+    app.include_router(slack_interactions_router)
     app.include_router(search_router)
     app.include_router(combined_router)
     app.include_router(milvus_router)

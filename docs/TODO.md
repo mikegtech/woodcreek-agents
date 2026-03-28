@@ -130,25 +130,49 @@ Enable agents and users to create reminders, but require explicit human approval
 - [x] `reminder_approval_records` table in PostgreSQL schema
 - [x] Tests: 205 total (44 new) covering approval workflows, policy, Slack commands, lifecycle transitions
 
-#### Phase 2B — Remaining
-- [ ] Scheduling engine: cron-like recurring reminders, relative-time reminders ("3 days before X")
-- [ ] Reminder editing, snooze, and cancellation with full audit trail via Slack
-- [ ] Household-level and individual targeting in Slack commands (e.g., "remind Mike" vs. "remind the household")
-- [ ] Slack interactive messages (buttons) for inline approve/reject
-- [ ] Manual reminder creation via SMS or CLI
+#### Phase 2B — Scheduling Engine and Slack Interactive Control ✓
+- [x] Scheduling engine with `tick()` function — finds due reminders, transitions one-shot to `pending_delivery`, creates recurring executions
+- [x] Cron-based recurring schedule computation via `croniter` — `compute_next_fire()` for standard cron expressions
+- [x] One-shot reminders: SCHEDULED → PENDING_DELIVERY on fire time
+- [x] Recurring reminders: stay SCHEDULED, create `ReminderExecution` per occurrence, update `next_fire_at`
+- [x] Duplicate-fire prevention: only SCHEDULED reminders with `next_fire_at <= now` are eligible
+- [x] Per-member targeting: `remind Mike about ...` resolves member by name via store
+- [x] Slack interactive buttons (Block Kit): approve/reject/cancel/snooze actions with `block_actions` endpoint
+- [x] Slack snooze command: `snooze <id> [minutes]`
+- [x] Slack cancel command: `cancel <id>`
+- [x] Scheduling queries: `scheduled reminders`, `recurring`, `pending delivery`
+- [x] `ReminderStore` extensions: `update_schedule`, `list_due_reminders`
+- [x] `SlackClient.update_message` for post-action message updates
+- [x] `/internal/slack/interactions` endpoint for Block Kit button callbacks
+- [x] Tests: 220 total (15 new) covering scheduler tick, cron computation, recurrence, per-member targeting, Slack commands
 
-### Phase 3 — Multi-Channel Delivery and Family Context
+#### Phase 2 — Remaining
+- [ ] Relative-time reminders ("3 days before X")
+- [ ] Manual reminder creation via SMS or CLI
+- [ ] Scheduling timer/poller (drives `tick()` on interval — FastAPI background task or external cron)
+
+### Phase 3 — Multi-Channel Delivery and Family Context (in progress)
 Wire reminders to real outbound channels and support household/group dynamics.
 
-- [ ] SMS delivery via Telnyx (outbound SMS — urgent, fallback, escalation)
-- [ ] Email delivery via woodcreek.me SMTP (rich context, digests, archival)
-- [ ] Slack notification delivery (operator/admin workflows, interactive approval buttons)
-- [ ] Delivery preferences per `HouseholdMember`: preferred channel, quiet hours, urgency overrides
-- [ ] `PreferenceRule` engine: "Mike prefers SMS for urgent, email for informational"; "No reminders after 10pm unless critical"
-- [ ] Delivery receipts and failure handling (bounce, undeliverable, retry logic)
-- [ ] Acknowledgement model: members ack via Slack reaction, SMS reply, email link, or future push action
-- [ ] Snooze flow: "snooze 30 min" via Slack or SMS reply
-- [ ] Escalation: if no ack within configurable window, re-deliver via alternate channel or escalate to another household member
+#### Phase 2C / 3A — Outbound Delivery via Telnyx and Email ✓
+- [x] `DeliveryDispatcher` application service: finds PENDING_DELIVERY reminders, resolves targets to members, dispatches via adapters, records outcomes, transitions state
+- [x] `TelnyxSmsAdapter`: wraps existing `TelnyxProvider`, formats SMS-safe messages with urgency prefix and ack instructions
+- [x] `SmtpEmailAdapter`: AWS WorkMail SMTP_SSL delivery with HTML+text multipart, reminder metadata headers
+- [x] `channel_policy.select_channel()`: deterministic channel selection by urgency/intent/contact info (critical→SMS, normal→email, digest→email only)
+- [x] `acknowledge_delivery()` service: channel-neutral ack intake seam, transitions DELIVERED→ACKNOWLEDGED
+- [x] `EventPublisher` port + `NoOpEventPublisher`: Kafka-aligned seam for domain events (reminder.delivered, reminder.delivery_failed, reminder.acknowledged) — wired to Kafka in Phase 4
+- [x] Delivery status queries: `list_delivered`, `list_failed_deliveries`, `get_delivery_details`
+- [x] Slack delivery visibility: `delivered today`, `failed deliveries` commands
+- [x] SMTP settings: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`
+- [x] Tests: 236 total (16 new) covering dispatch, channel selection, ack, failure handling, event publishing
+
+#### Phase 3 — Remaining
+- [ ] Slack notification delivery adapter
+- [ ] `PreferenceRule` engine integration with channel policy
+- [ ] Quiet hours enforcement in channel selection
+- [ ] Delivery retry with backoff
+- [ ] Escalation: if no ack within window, re-deliver via fallback channel or escalate to another member
+- [ ] Batch/digest mode: group low-priority reminders into daily/weekly household digests
 
 ### Phase 4 — Event-Driven Household Orchestration
 Move from scheduled reminders to reactive, event-driven triggers across the agent ecosystem.
