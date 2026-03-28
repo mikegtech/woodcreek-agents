@@ -308,6 +308,26 @@ Allow agents limited autonomous action only after audit, approval, and guardrail
 - [x] Scheduler task reads `langgraph_enabled` from settings
 - [x] Tests: 387 unit (10 new) covering graph build, wait states, approval resume, delivery, retry, rejected/cancelled terminal, runner, control loop integration
 
+#### Phase 8A — Cross-Agent Reminder Coordination and Suggestion Drafts ✓
+- [x] `coordination.py`: `ReminderCandidate`, `Enrichment`, `enrich_candidate()`, `coordinate()` (merge by dedupe_key, suppress by subject), `suppress_if_exists()`
+- [x] `suggestions.py`: `SuggestionDraft`, `generate_suggestions()` — calendar-event proximity (3-day window), maintenance cadence (>90d), household pattern detection
+- [x] `ICalFeedAdapter`: read-only iCal/ICS feed adapter with httpx fetch, lightweight VEVENT parser, 5-minute caching, provider-neutral `CalendarEvent` normalization
+- [x] Slack: `suggestions` / `suggested reminders` command
+- [x] Tests: 401 unit (14 new) covering enrichment, merge/suppress, calendar suggestions, dedup avoidance, iCal parsing
+
+#### Phase 8C — Calendar Write-Back ADR and Constrained Implementation ✓
+- [x] ADR-007: Calendar write-back decision — one-way, create+delete mirroring for eligible reminders only
+- [x] Eligibility policy: SCHEDULED/APPROVED + INDIVIDUAL target + non-DIGEST intent + has CalendarIdentity + governance allows
+- [x] `CalendarAdapter` write interface: `create_event()`, `delete_event()` added to port
+- [x] `WorkMailEwsAdapter` write: `create_event()` (EWS CalendarItem), `delete_event()` (EWS delete)
+- [x] `MockCalendarAdapter` write: in-memory create/delete for dev/test
+- [x] `CalendarMirrorService`: eligibility check → governance gate → identity resolve → create event → persist linkage → return `MirrorResult`
+- [x] `CalendarMirrorRecord`: durable linkage (reminder_id, identity_id, provider, external_event_id, status)
+- [x] `calendar_mirrors` table: PostgreSQL schema with unique constraint on (reminder_id, calendar_identity_id)
+- [x] Delete mirror: on reminder cancellation, delete the mirrored calendar event
+- [x] Slack: `mirror` / `calendar mirror` status command
+- [x] Tests: 411 unit (10 new) covering eligibility, idempotency, governance blocking, delete, status visibility
+
 ---
 
 ## iPhone App & Push Notification Evolution

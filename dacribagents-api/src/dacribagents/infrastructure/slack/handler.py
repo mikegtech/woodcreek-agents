@@ -16,6 +16,7 @@ from dacribagents.application.ports.reminder_store import ReminderStore
 from dacribagents.application.services import anomaly_review, audit_timeline
 from dacribagents.application.services import calendar_queries as cq
 from dacribagents.application.services import governance as gov
+from dacribagents.application.services import suggestions as sug
 from dacribagents.application.use_cases import reminder_queries as rq
 from dacribagents.application.use_cases import reminder_workflows as wf
 from dacribagents.domain.reminders.enums import (
@@ -103,6 +104,9 @@ class SlackCommandHandler:
         if _matches(text, ["anomal", "flag"]):
             return self._handle_anomalies()
 
+        if _matches(text, ["suggest", "suggestion"]):
+            return self._handle_suggestions()
+
         if text.startswith("cancel "):
             return self._handle_cancel(text)
 
@@ -165,6 +169,9 @@ class SlackCommandHandler:
 
         if _matches(text, ["event originated", "event created", "from events", "upstream"]):
             return self._handle_event_originated()
+
+        if _matches(text, ["mirror", "mirrored", "calendar mirror"]):
+            return self._handle_mirror_status()
 
         if _matches(text, ["deferred", "quiet hours", "suppressed"]):
             return self._handle_deferred()
@@ -259,6 +266,15 @@ class SlackCommandHandler:
         reminders = rq.list_event_originated(self.store, self.household_id)
         return SlackResponse(text=fmt.format_reminder_list(reminders, "Event-Originated Reminders"))
 
+    def _handle_mirror_status(self) -> SlackResponse:
+        active = rq.list_active(self.store, self.household_id)
+        if not active:
+            return SlackResponse(text="*Calendar Mirrors*\nNo active reminders.")
+        lines = ["*Calendar Mirror Status*\n"]
+        lines.append("Calendar mirroring is available for INDIVIDUAL-targeted, SCHEDULED reminders.")
+        lines.append("Use `explain reminder` for detailed mirror status per reminder.")
+        return SlackResponse(text="\n".join(lines))
+
     def _handle_deferred(self) -> SlackResponse:
         """Show reminders that were deferred (quiet hours, suppressed)."""
         # In the current model, deferred reminders stay in PENDING_DELIVERY
@@ -325,6 +341,19 @@ class SlackCommandHandler:
         lines = ["*Audit Timeline*\n"]
         for e in entries[-15:]:
             lines.append(f"`{e.timestamp:%H:%M}` *{e.event_type}*  {e.summary}")
+        return SlackResponse(text="\n".join(lines))
+
+    def _handle_suggestions(self) -> SlackResponse:
+        date_range = _parse_date_range("tomorrow")
+        events = self.calendar.list_all_events(date_range)
+        drafts = sug.generate_suggestions(self.store, self.household_id, events)
+        if not drafts:
+            return SlackResponse(text="*Suggestions*\nNo suggestions at this time.")
+        lines = [f"*Suggested Reminders* ({len(drafts)} items)\n"]
+        for d in drafts:
+            lines.append(f":bulb: *{d.subject}*")
+            lines.append(f"  _{d.reason}_")
+            lines.append(f"  Sources: {', '.join(d.context_sources)}")
         return SlackResponse(text="\n".join(lines))
 
     def _handle_anomalies(self) -> SlackResponse:

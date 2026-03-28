@@ -61,3 +61,25 @@ class CalendarAdapter(Protocol):
     ) -> CalendarEvent | None:
         """Return a single event by ID, or None if not found."""
         ...
+
+    # ── Write operations (Phase 8C+, behind CalendarAccessPolicy) ───
+
+    def create_event(  # noqa: D102, PLR0913
+        self,
+        identity_id: UUID,
+        title: str,
+        start: datetime,
+        end: datetime,
+        body: str = "",
+        metadata: dict | None = None,
+    ) -> str | None:
+        """Create a calendar event. Returns the external event ID, or None on failure."""
+        ...
+
+    def delete_event(  # noqa: D102
+        self,
+        identity_id: UUID,
+        event_id: str,
+    ) -> bool:
+        """Delete a calendar event by ID. Returns True on success."""
+        ...

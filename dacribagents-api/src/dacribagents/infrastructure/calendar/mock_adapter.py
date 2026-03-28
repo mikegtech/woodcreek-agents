@@ -7,6 +7,7 @@ and ``get_event()``.
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from dacribagents.application.ports.calendar_adapter import (
@@ -56,3 +57,37 @@ class MockCalendarAdapter:
     def list_all_events(self, date_range: DateRange) -> list[CalendarEvent]:
         """Return all events in range regardless of identity (household view)."""
         return [e for e in self._events if e.start < date_range.end and e.end > date_range.start]
+
+    # ── Write operations ────────────────────────────────────────────
+
+    def create_event(  # noqa: PLR0913
+        self,
+        identity_id: UUID,
+        title: str,
+        start: datetime,
+        end: datetime,
+        body: str = "",
+        metadata: dict | None = None,
+    ) -> str | None:
+        """Create a mock calendar event. Returns a generated event ID."""
+        from uuid import uuid4  # noqa: PLC0415
+
+        event_id = f"mock-{uuid4().hex[:8]}"
+        self._events.append(CalendarEvent(
+            id=event_id, title=title, start=start, end=end,
+            source=CalendarProviderType.MANUAL, owner_identity_id=identity_id,
+            description=body,
+        ))
+        return event_id
+
+    def delete_event(
+        self,
+        identity_id: UUID,
+        event_id: str,
+    ) -> bool:
+        """Delete a mock calendar event by ID."""
+        for i, e in enumerate(self._events):
+            if e.id == event_id:
+                self._events.pop(i)
+                return True
+        return False

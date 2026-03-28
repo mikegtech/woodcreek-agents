@@ -364,6 +364,26 @@ CREATE INDEX IF NOT EXISTS idx_ut_household  ON unified_timeline(household_id);
 CREATE INDEX IF NOT EXISTS idx_ut_reminder   ON unified_timeline(reminder_id) WHERE reminder_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ut_created    ON unified_timeline(created_at);
 CREATE INDEX IF NOT EXISTS idx_ut_type       ON unified_timeline(event_type);
+
+-- ==========================================================================
+-- Calendar Mirror Linkage
+-- ==========================================================================
+
+CREATE TABLE IF NOT EXISTS calendar_mirrors (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reminder_id         UUID         NOT NULL REFERENCES reminders(id),
+    calendar_identity_id UUID        NOT NULL,
+    provider            VARCHAR(50)  NOT NULL,
+    external_event_id   VARCHAR(500) NOT NULL,
+    status              VARCHAR(50)  NOT NULL DEFAULT 'active',
+    created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    deleted_at          TIMESTAMPTZ,
+    failure_reason      TEXT,
+    UNIQUE (reminder_id, calendar_identity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cm_reminder ON calendar_mirrors(reminder_id);
+CREATE INDEX IF NOT EXISTS idx_cm_status   ON calendar_mirrors(status);
 """
 
 

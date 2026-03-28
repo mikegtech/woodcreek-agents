@@ -107,6 +107,58 @@ class WorkMailEwsAdapter:
         """Household-wide view — same as list_events for a single-account setup."""
         return self.list_events(UUID(int=0), date_range)
 
+    # ── Write operations (Phase 8C) ────────────────────────────────────
+
+    def create_event(  # noqa: PLR0913
+        self,
+        identity_id: UUID,
+        title: str,
+        start: datetime,
+        end: datetime,
+        body: str = "",
+        metadata: dict | None = None,
+    ) -> str | None:
+        """Create a calendar event. Returns the EWS item_id."""
+        try:
+            account = self._get_account()
+            from exchangelib import CalendarItem, EWSDateTime, EWSTimeZone, HTMLBody  # noqa: PLC0415
+
+            tz = EWSTimeZone("America/Chicago")
+            item = CalendarItem(
+                account=account,
+                folder=account.calendar,
+                subject=title,
+                body=HTMLBody(body) if body else None,
+                start=EWSDateTime.from_datetime(start.replace(tzinfo=timezone.utc)).astimezone(tz),
+                end=EWSDateTime.from_datetime(end.replace(tzinfo=timezone.utc)).astimezone(tz),
+            )
+            item.save()
+            event_id = str(item.item_id) if hasattr(item, "item_id") else str(item.id)
+            logger.info(f"WorkMail EWS event created: {event_id}")
+            return event_id
+        except Exception as e:
+            logger.error(f"WorkMail EWS create_event failed: {e}")
+            return None
+
+    def delete_event(
+        self,
+        identity_id: UUID,
+        event_id: str,
+    ) -> bool:
+        """Delete a calendar event by EWS item_id."""
+        try:
+            account = self._get_account()
+            from exchangelib import ItemId  # noqa: PLC0415
+
+            items = list(account.calendar.filter(item_id=ItemId(id=event_id)))
+            for item in items:
+                item.delete()
+            logger.info(f"WorkMail EWS event deleted: {event_id}")
+            return True
+        except Exception as e:
+            logger.error(f"WorkMail EWS delete_event failed: {e}")
+            return False
+
 
 def _normalize_event(item: object, identity_id: UUID) -> CalendarEvent:
     """Convert an exchangelib CalendarItem to a provider-neutral CalendarEvent."""
