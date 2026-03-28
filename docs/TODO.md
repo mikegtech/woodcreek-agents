@@ -205,11 +205,24 @@ Move from scheduled reminders to reactive, event-driven triggers across the agen
 - [x] Settings: `SLACK_DELIVERY_CHANNEL` for reminder notification destination
 - [x] Tests: 297 total (26 new) covering SMS command parsing, ack/snooze/cancel via reply, correlation, Slack adapter
 
+#### Phase 4C — WorkMail/EWS Calendar Adapter and Context Enrichment ✓
+- [x] `WorkMailEwsAdapter`: read-only EWS adapter via `exchangelib`, implements `CalendarAdapter` protocol, normalizes events to `CalendarEvent`
+- [x] Calendar identity resolution: `CalendarIdentity` entity maps member → EWS principal, `resolve_identity()` looks up active identities
+- [x] `compute_free_busy()`: free/busy slots from calendar events, `find_free_window()` for "when is Mike free for 30 min?"
+- [x] `compute_conflicts()`: per-member conflict report using identity-resolved calendar queries
+- [x] `find_reminder_overlaps()`: active reminders that overlap calendar events in a time window
+- [x] `enrich_reminder_context()`: nearby/overlapping event metadata for reminder explanations
+- [x] Slack commands: `free for 30 minutes tomorrow`, `overlap reminders events tomorrow`
+- [x] Enhanced conflict handler uses identity-based conflict report when calendar identities are available
+- [x] `InMemoryReminderStore.calendar_identities` dict for dev/test
+- [x] Settings: `WORKMAIL_EWS_EMAIL`, `WORKMAIL_EWS_PASSWORD`, `WORKMAIL_EWS_REGION`
+- [x] Tests: 308 total (11 new) covering identity resolution, free/busy, free window finding, conflicts, overlap detection, context enrichment
+
 #### Phase 4 — Remaining
-- [ ] Cross-agent reminder coordination: maintenance agent triggers reminder, compliance agent enriches it
 - [ ] Calendar write-back: approved reminders optionally sync to WorkMail calendar (via CalendarAdapter)
 - [ ] Batch/digest mode: group low-priority reminders into daily or weekly household digests
 - [ ] LangGraph workflow integration: reminder lifecycle as a durable LangGraph graph with checkpointing
+- [ ] Cross-agent reminder coordination
 
 ### Phase 5 — Guardrailed Autonomy and Governance
 Allow agents limited autonomous action only after audit, approval, and guardrail infrastructure is proven.

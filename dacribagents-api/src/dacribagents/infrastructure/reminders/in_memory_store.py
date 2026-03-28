@@ -19,6 +19,7 @@ from uuid import UUID
 
 from dacribagents.domain.reminders.entities import (
     ApprovalRecord,
+    CalendarIdentity,
     Household,
     HouseholdMember,
     PreferenceRule,
@@ -45,6 +46,7 @@ class InMemoryReminderStore:
         self.approval_records: dict[UUID, list[ApprovalRecord]] = {}
         self.households: dict[UUID, Household] = {}
         self.members: dict[UUID, HouseholdMember] = {}
+        self.calendar_identities: dict[UUID, CalendarIdentity] = {}
         self.preference_rules: list[PreferenceRule] = []
 
     # ── Household ───────────────────────────────────────────────────────

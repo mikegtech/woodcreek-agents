@@ -13,6 +13,7 @@ from uuid import UUID
 
 from dacribagents.application.ports.calendar_adapter import DateRange
 from dacribagents.application.ports.reminder_store import ReminderStore
+from dacribagents.application.services import calendar_queries as cq
 from dacribagents.application.use_cases import reminder_queries as rq
 from dacribagents.application.use_cases import reminder_workflows as wf
 from dacribagents.domain.reminders.enums import (
@@ -103,6 +104,12 @@ class SlackCommandHandler:
         if _matches(text, ["conflict", "conflicts", "busy"]):
             return self._handle_conflicts(text)
 
+        if _matches(text, ["free"]) and _matches(text, ["minute", "min", "hour"]):
+            return self._handle_free_window(text)
+
+        if _matches(text, ["overlap"]) and _matches(text, ["reminder", "event"]):
+            return self._handle_overlap(text)
+
         if _matches(text, ["draft"]) and _matches(text, ["reminder"]):
             return self._handle_draft_preview(raw_text)
 
@@ -167,9 +174,41 @@ class SlackCommandHandler:
 
     def _handle_conflicts(self, text: str) -> SlackResponse:
         date_range = _parse_date_range(text)
+        report = cq.compute_conflicts(self.calendar, self.store, self.household_id, date_range)
+        if report.member_conflicts:
+            return SlackResponse(text=fmt.format_conflict_report(report, _date_range_label(date_range)))
+        # Fallback to simple event listing if no identity-based conflicts found
         events = self.calendar.list_all_events(date_range)
         label = _date_range_label(date_range)
         return SlackResponse(text=fmt.format_calendar_conflicts(events, label))
+
+    def _handle_free_window(self, text: str) -> SlackResponse:
+        """Find a free window for a member."""
+        date_range = _parse_date_range(text)
+        # Parse duration: "free for 30 minutes" or "free for 1 hour"
+        duration = 30
+        dur_match = re.search(r"(\d+)\s*(?:minute|min|hour|hr)", text)
+        if dur_match:
+            val = int(dur_match.group(1))
+            if "hour" in text or "hr" in text:
+                val *= 60
+            duration = val
+
+        events = self.calendar.list_all_events(date_range)
+        summary = cq.compute_free_busy(events, date_range, "Household")
+        slot = cq.find_free_window(summary, duration)
+        if slot:
+            return SlackResponse(
+                text=f":white_check_mark: Free window found: *{slot.start:%H:%M}–{slot.end:%H:%M}* ({duration}min)"
+            )
+        return SlackResponse(text=f":x: No free {duration}-minute window found in {_date_range_label(date_range)}")
+
+    def _handle_overlap(self, text: str) -> SlackResponse:
+        """Show reminders that overlap calendar events."""
+        date_range = _parse_date_range(text)
+        events = self.calendar.list_all_events(date_range)
+        overlaps = cq.find_reminder_overlaps(self.store, self.household_id, events)
+        return SlackResponse(text=fmt.format_reminder_overlaps(overlaps))
 
     def _handle_draft_preview(self, raw_text: str) -> SlackResponse:
         parsed = _parse_draft_intent(raw_text)

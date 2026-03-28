@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     smtp_from_address: str = "reminders@woodcreek.me"
 
     # =========================================================================
+    # WorkMail EWS Calendar
+    # =========================================================================
+    workmail_ews_email: str = ""
+    workmail_ews_password: SecretStr = Field(default=SecretStr(""))
+    workmail_ews_region: str = "us-east-1"
+
+    # =========================================================================
     # Observability
     # =========================================================================
     langsmith_api_key: SecretStr | None = None

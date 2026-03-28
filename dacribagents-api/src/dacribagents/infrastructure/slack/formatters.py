@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dacribagents.application.ports.calendar_adapter import CalendarEvent
+from dacribagents.application.services.calendar_queries import ConflictReport, ReminderOverlap
 from dacribagents.application.use_cases.reminder_queries import (
     DraftPreview,
     ReminderExplanation,
@@ -273,4 +274,30 @@ def format_calendar_conflicts(
     for e in sorted(events, key=lambda x: x.start):
         time_str = "all day" if e.all_day else f"{e.start:%H:%M}–{e.end:%H:%M}"
         lines.append(f"  :calendar: {time_str}  *{e.title}*")
+    return "\n".join(lines)
+
+
+def format_conflict_report(report: ConflictReport, label: str) -> str:
+    """Format identity-based conflict report per member."""
+    if not report.member_conflicts:
+        return f"*Conflicts for {label}:* None found — all clear!"
+
+    lines = [f"*Conflicts for {label}*\n"]
+    for name, slots in report.member_conflicts.items():
+        lines.append(f"*{name}:*")
+        for s in sorted(slots, key=lambda x: x.start):
+            lines.append(f"  :calendar: {s.start:%H:%M}–{s.end:%H:%M}  {s.title}")
+    return "\n".join(lines)
+
+
+def format_reminder_overlaps(overlaps: list[ReminderOverlap]) -> str:
+    """Format reminders that overlap with calendar events."""
+    if not overlaps:
+        return "*Reminder/Calendar Overlaps*\nNo overlaps found — all clear!"
+
+    lines = [f"*Reminder/Calendar Overlaps* ({len(overlaps)} reminders)\n"]
+    for o in overlaps:
+        icon = _URGENCY_ICON.get(o.reminder.urgency, ":bell:")
+        events_str = ", ".join(e.title for e in o.overlapping_events)
+        lines.append(f"{icon} *{o.reminder.subject}* overlaps with: _{events_str}_")
     return "\n".join(lines)
