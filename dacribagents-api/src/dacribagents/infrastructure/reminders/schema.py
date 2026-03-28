@@ -297,6 +297,73 @@ CREATE TABLE IF NOT EXISTS reminder_audit_log (
 CREATE INDEX IF NOT EXISTS idx_ral_reminder  ON reminder_audit_log(reminder_id);
 CREATE INDEX IF NOT EXISTS idx_ral_actor     ON reminder_audit_log(actor);
 CREATE INDEX IF NOT EXISTS idx_ral_created   ON reminder_audit_log(created_at);
+
+-- ==========================================================================
+-- Governance State
+-- ==========================================================================
+
+CREATE TABLE IF NOT EXISTS governance_state (
+    household_id    UUID PRIMARY KEY,
+    tier            INTEGER      NOT NULL DEFAULT 0,
+    kill_switch     BOOLEAN      NOT NULL DEFAULT false,
+    kill_switch_by  VARCHAR(255),
+    kill_switch_at  TIMESTAMPTZ,
+    daily_budget    INTEGER      NOT NULL DEFAULT 50,
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS governance_muted_members (
+    member_id       UUID PRIMARY KEY,
+    household_id    UUID         NOT NULL,
+    reason          TEXT         NOT NULL DEFAULT '',
+    muted_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gmm_household ON governance_muted_members(household_id);
+
+CREATE TABLE IF NOT EXISTS governance_budget_counters (
+    household_id    UUID         NOT NULL,
+    date            DATE         NOT NULL DEFAULT CURRENT_DATE,
+    count           INTEGER      NOT NULL DEFAULT 0,
+    PRIMARY KEY (household_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS governance_audit_log (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id    UUID         NOT NULL,
+    action_type     VARCHAR(100) NOT NULL,
+    actor_type      VARCHAR(50)  NOT NULL,
+    tier            INTEGER      NOT NULL,
+    decision        VARCHAR(50)  NOT NULL,
+    reason          TEXT         NOT NULL DEFAULT '',
+    reminder_id     UUID,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    metadata        JSONB        NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_gal_household ON governance_audit_log(household_id);
+CREATE INDEX IF NOT EXISTS idx_gal_created   ON governance_audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_gal_decision  ON governance_audit_log(decision);
+
+-- ==========================================================================
+-- Unified Audit Timeline
+-- ==========================================================================
+
+CREATE TABLE IF NOT EXISTS unified_timeline (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id    UUID         NOT NULL,
+    reminder_id     UUID,
+    event_type      VARCHAR(100) NOT NULL,
+    actor           VARCHAR(255) NOT NULL DEFAULT 'system',
+    summary         TEXT         NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    metadata        JSONB        NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_ut_household  ON unified_timeline(household_id);
+CREATE INDEX IF NOT EXISTS idx_ut_reminder   ON unified_timeline(reminder_id) WHERE reminder_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ut_created    ON unified_timeline(created_at);
+CREATE INDEX IF NOT EXISTS idx_ut_type       ON unified_timeline(event_type);
 """
 
 

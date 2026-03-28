@@ -262,10 +262,20 @@ Allow agents limited autonomous action only after audit, approval, and guardrail
 - [x] Existing delivery/escalation/SMS tests updated with governance fixture (reset + tier setup)
 - [x] Tests: 358 total (15 new) covering dispatch gating, Tier 2/3 behavior, mute/bypass, escalation gating, review summary
 
-#### Phase 5 — Remaining
-- [ ] Anomaly detection: flag unusual patterns (spikes, repeated escalations)
-- [ ] Full audit trail integration: wire governance audit into the reminder audit log for unified history
-- [ ] PostgreSQL-backed governance state (replace in-memory GovernanceState)
+#### Phase 5C — PostgreSQL Persistence, Audit Timeline, Anomaly Review, Production Readiness ✓
+- [x] `PostgresReminderStore`: full SQL implementation of `ReminderStore` protocol against existing schema DDL
+- [x] Governance schema: `governance_state`, `governance_muted_members`, `governance_budget_counters`, `governance_audit_log` tables
+- [x] `unified_timeline` table: indexed by household_id, reminder_id, event_type, created_at
+- [x] `audit_timeline` service: `get_reminder_timeline()` correlates creation + approval + execution + delivery + governance entries; `get_household_timeline()` for governance activity
+- [x] `anomaly_review` service: 4 deterministic rules — budget exhaustion, kill-switch churn (>2/24h), blocked-action spike (>10/24h), escalation concentration (>3/24h)
+- [x] `GET /health/subsystems`: checks PostgreSQL, Kafka, Slack, Telnyx, SMTP, governance readiness (no secret leaks)
+- [x] Slack commands: `timeline reminder`, `anomalies/flags`
+- [x] Tests: 368 total (10 new) covering timeline, anomaly rules, health check
+
+#### Phase 5 — Production Hardening Remaining
+- [ ] Wire `PostgresReminderStore` into production FastAPI lifespan (replace InMemoryReminderStore)
+- [ ] Wire `GovernanceState` persistence to governance PostgreSQL tables
+- [ ] Database migration tooling (Alembic or equivalent)
 
 ---
 

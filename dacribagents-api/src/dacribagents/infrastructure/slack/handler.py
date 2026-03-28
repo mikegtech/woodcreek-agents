@@ -13,6 +13,7 @@ from uuid import UUID
 
 from dacribagents.application.ports.calendar_adapter import DateRange
 from dacribagents.application.ports.reminder_store import ReminderStore
+from dacribagents.application.services import anomaly_review, audit_timeline
 from dacribagents.application.services import calendar_queries as cq
 from dacribagents.application.services import governance as gov
 from dacribagents.application.use_cases import reminder_queries as rq
@@ -95,6 +96,12 @@ class SlackCommandHandler:
 
         if _matches(text, ["muted", "muted members"]):
             return self._handle_list_muted()
+
+        if _matches(text, ["timeline"]) and _matches(text, ["reminder"]):
+            return self._handle_timeline(text)
+
+        if _matches(text, ["anomal", "flag"]):
+            return self._handle_anomalies()
 
         if text.startswith("cancel "):
             return self._handle_cancel(text)
@@ -305,6 +312,30 @@ class SlackCommandHandler:
             return SlackResponse(text=f":x: No member found matching `{name}`.")
         gov.unmute_member(member.id)
         return SlackResponse(text=f":loud_sound: *{member.name}* unmuted — normal delivery resumed.")
+
+    def _handle_timeline(self, text: str) -> SlackResponse:
+        """Show unified timeline for the most recent pending-approval reminder."""
+        pending = rq.list_pending_approval(self.store, self.household_id)
+        if pending:
+            entries = audit_timeline.get_reminder_timeline(self.store, pending[0].id)
+        else:
+            entries = audit_timeline.get_household_timeline(self.store, self.household_id, limit=15)
+        if not entries:
+            return SlackResponse(text="*Timeline*\nNo entries found.")
+        lines = ["*Audit Timeline*\n"]
+        for e in entries[-15:]:
+            lines.append(f"`{e.timestamp:%H:%M}` *{e.event_type}*  {e.summary}")
+        return SlackResponse(text="\n".join(lines))
+
+    def _handle_anomalies(self) -> SlackResponse:
+        flags = anomaly_review.check_anomalies(self.household_id)
+        if not flags:
+            return SlackResponse(text="*Anomaly Review*\nNo anomalies detected — all clear.")
+        lines = ["*Anomaly Review*\n"]
+        for f in flags:
+            icon = ":rotating_light:" if f.severity == "critical" else ":warning:"
+            lines.append(f"{icon} `{f.rule}` — {f.description}")
+        return SlackResponse(text="\n".join(lines))
 
     def _handle_list_muted(self) -> SlackResponse:
         muted = gov.list_muted_members()
