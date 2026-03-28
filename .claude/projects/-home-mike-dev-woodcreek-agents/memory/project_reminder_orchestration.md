@@ -1,19 +1,30 @@
 ---
 name: Reminder Orchestration Initiative
-description: Household reminder orchestration platform (ADR-006) with Slack control surface, WorkMail calendar, iPhone/APNs end-state, Telnyx SMS fallback
+description: Household reminder platform (ADR-006) — Phase 0 complete, Phase 1 Slack + read-only intelligence in progress
 type: project
 ---
 
-Household reminder orchestration was introduced as a first-class platform capability in ADR-006 (2026-03-28, revised same day). Reminders are a shared domain — not per-agent notification logic.
+Household reminder orchestration is the major platform initiative (ADR-006, 2026-03-28).
 
-**Channel model:**
-- Slack = conversational control surface, approval UX, `@woodcreek` interactions
-- Telnyx SMS = urgent delivery, fallback, escalation
-- Email (woodcreek.me) = rich context, digests, archival
-- iPhone app / APNs push = long-term primary household notification (future)
+**Phase 0** (complete): Domain entities, lifecycle state machine, ports, use cases, PostgreSQL schema, 117 tests.
 
-**Calendar strategy:** Provider-neutral interface from day one. AWS WorkMail / EWS is the first adapter (service-owned credentials, no token churn). Gmail OAuth explicitly deferred.
+**Phase 1** (in progress): Read-only context and reminder intelligence.
+- Slack `@woodcreek` operator surface via `/internal/slack/events` FastAPI endpoint
+- Reminder queries: pending approvals, active alerts, explain, draft preview, schedule summary
+- Provider-neutral calendar: MockCalendarAdapter (ready for WorkMail/EWS swap)
+- InMemoryReminderStore for dev (will be replaced by PostgreSQL-backed store)
+- 161 total tests
 
-**Why:** Agents (HOA, warranties, maintenance, security) all generate time-sensitive actions. Without a unified layer, delivery is fragmented with no ack/escalation/audit.
+**Channel model:** Slack = control surface, Telnyx SMS = urgent/fallback, Email = context/archive, iPhone/APNs = future primary.
 
-**How to apply:** Route all agent notifications through the reminder domain model. CalendarIdentity is separate from email identity. MemberDevice is anticipated from Phase 0 for future push. Autonomy is gated behind Tier 0-3 progression. Home Warranty ADR bumped to ADR-007.
+**Calendar strategy:** Provider-neutral from day one. WorkMail/EWS first adapter (not yet built). Gmail OAuth deferred.
+
+**Key files:**
+- Domain: `dacribagents-api/src/dacribagents/domain/reminders/`
+- Queries: `application/use_cases/reminder_queries.py`
+- Slack: `infrastructure/slack/` (handler, formatters, client, _store)
+- Calendar: `infrastructure/calendar/mock_adapter.py`
+- Endpoint: `infrastructure/http/slack_ingest.py`
+- Store: `infrastructure/reminders/in_memory_store.py`
+
+**How to apply:** Route Slack operator queries through SlackCommandHandler. All notification delivery goes through reminder domain. CalendarIdentity separate from email identity. Autonomy gated behind Tier 0-3 progression.

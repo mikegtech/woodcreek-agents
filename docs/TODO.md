@@ -63,28 +63,57 @@ Calendar integrations use a **provider-neutral abstraction from day one**, with 
 
 See [ADR-006](ADRs/ADR-006.md) for domain model, lifecycle, delivery architecture, and governance decisions.
 
-### Phase 0 — Reminder Domain & Architecture
+### Phase 0 — Reminder Domain & Architecture ✓
 Define the core domain model and persistence layer before any runtime behavior.
 
-- [ ] Define domain entities: `Household`, `HouseholdMember`, `Reminder`, `ReminderTarget`, `ReminderSchedule`, `ReminderDelivery`, `ReminderExecution`, `ReminderAcknowledgement`, `PreferenceRule`, `ReminderContextSource`
-- [ ] Define calendar identity entities: `CalendarIdentity`, `CalendarProvider`, `CalendarAccessPolicy`
-- [ ] Anticipate device registration: `MemberDevice` for future APNs/push support
-- [ ] Design reminder lifecycle state machine (draft → scheduled → pending_delivery → delivered → acknowledged / snoozed / escalated → cancelled / failed)
-- [ ] Schema design in PostgreSQL (reminder tables, household/member tables, delivery log, audit trail)
-- [ ] Define Pydantic/TypeScript models for inter-agent reminder protocol
-- [ ] Establish `packages/shared/reminders/` as the shared reminder domain library
-- [ ] Design provider-neutral `CalendarAdapter` interface
-- [ ] Write ADR-006 decision record *(this document)*
+- [x] Define domain entities: `Household`, `HouseholdMember`, `Reminder`, `ReminderTarget`, `ReminderSchedule`, `ReminderDelivery`, `ReminderExecution`, `ReminderAcknowledgement`, `PreferenceRule`, `ReminderContextSource` — `domain/reminders/entities.py`
+- [x] Define calendar identity entities: `CalendarIdentity`, `CalendarProvider`, `CalendarAccessPolicy` — `domain/reminders/entities.py`
+- [x] Anticipate device registration: `MemberDevice` for future APNs/push support — `domain/reminders/entities.py`
+- [x] Design reminder lifecycle state machine (draft → scheduled → pending_delivery → delivered → acknowledged / snoozed → cancelled / failed) — `domain/reminders/lifecycle.py`
+- [x] Schema design in PostgreSQL (reminder tables, household/member tables, delivery log, audit trail) — `infrastructure/reminders/schema.py`
+- [x] Define Pydantic models for reminder API contracts — `domain/reminders/models.py`
+- [x] Establish `domain/reminders/` as the shared reminder domain package
+- [x] Design provider-neutral `CalendarAdapter` interface — `application/ports/calendar_adapter.py`
+- [x] Design provider-neutral `DeliveryChannelAdapter` interface — `application/ports/delivery_channel.py`
+- [x] Design `ReminderPolicy` interface — `application/ports/reminder_policy.py`
+- [x] Design `ReminderStore` persistence interface — `application/ports/reminder_store.py`
+- [x] Implement reminder workflow use cases (create, update, schedule, cancel, ack, snooze, list) — `application/use_cases/reminder_workflows.py`
+- [x] Write ADR-006 decision record
+- [x] Tests: 101 passing (lifecycle transitions, entity validation, API model validation, workflow use cases)
 
-### Phase 1 — Read-Only Context and Reminder Intelligence
-Give agents visibility into existing schedules and household context without writing or sending anything.
+### Phase 1 — Read-Only Context and Reminder Intelligence (in progress)
+Give agents and the operator visibility into existing schedules and household context without writing or sending anything. Slack is the first operator-facing interaction surface.
 
-- [ ] Implement `CalendarAdapter` interface with AWS WorkMail / EWS as first adapter
-- [ ] Build `ReminderContextSource` adapters: WorkMail calendar events, email-derived dates, HOA calendar, manual entries
-- [ ] Reminder suggestion engine: agents propose reminders based on context (e.g., HOA compliance deadlines, warranty expirations, maintenance windows)
-- [ ] Context enrichment: attach relevant household member info, delivery preferences, and prior reminder history to suggestions
-- [ ] iCal feed adapter (read-only — works with any published calendar)
+#### Implemented
+- [x] Slack operator interaction surface — `@woodcreek` app mention handler via `/internal/slack/events` endpoint
+  - Pending approvals, active alerts, active reminders queries
+  - Schedule/calendar queries ("what does tomorrow look like?")
+  - Conflict detection ("who has conflicts Thursday night?")
+  - Draft preview ("draft a reminder for the family about soccer at 5")
+  - Approval explanation ("explain why this reminder needs approval")
+  - Keyword-based command router with structured Slack mrkdwn responses
+- [x] Read-only reminder intelligence queries — `application/use_cases/reminder_queries.py`
+  - `list_pending_approval`, `list_active_alerts`, `list_active`, `list_by_states`
+  - `explain_reminder` with source/approval/lifecycle descriptions
+  - `preview_draft` non-destructive draft preview with channel estimates and notes
+  - `build_schedule_summary` combined reminder + calendar view
+- [x] Provider-neutral calendar read boundary — `MockCalendarAdapter` implementing `CalendarAdapter` protocol
+  - `list_events`, `get_event`, `list_all_events` (household view)
+  - Ready for WorkMail/EWS adapter swap without interface changes
+- [x] `InMemoryReminderStore` — dev/test store implementation in `infrastructure/reminders/in_memory_store.py`
+- [x] Slack mrkdwn formatters for all query results — `infrastructure/slack/formatters.py`
+- [x] Slack client (httpx-based, no slack-sdk dependency) — `infrastructure/slack/client.py`
+- [x] Settings: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` configuration
+- [x] Tests: 44 new tests (161 total) covering handler routing, formatters, queries, calendar mock
+
+#### Remaining
+- [ ] AWS WorkMail / EWS calendar adapter (replaces MockCalendarAdapter for production)
+- [ ] iCal feed adapter (read-only)
+- [ ] Build `ReminderContextSource` adapters: email-derived dates, HOA calendar, manual entries
+- [ ] Reminder suggestion engine: agents propose reminders based on context
+- [ ] Context enrichment: attach household member info, delivery preferences, and prior history
 - [ ] Email-derived date extraction from existing RAG pipeline
+- [ ] Supervisor/agent routing integration for unrecognized Slack queries
 
 ### Phase 2 — Reminder Authoring with Human Approval
 Enable agents and users to create reminders, but require explicit human approval before anything is sent.

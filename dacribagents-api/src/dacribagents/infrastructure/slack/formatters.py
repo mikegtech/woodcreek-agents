@@ -1,0 +1,156 @@
+"""Format reminder domain objects for Slack mrkdwn responses."""
+
+from __future__ import annotations
+
+from dacribagents.application.ports.calendar_adapter import CalendarEvent
+from dacribagents.application.use_cases.reminder_queries import (
+    DraftPreview,
+    ReminderExplanation,
+    ScheduleSummary,
+)
+from dacribagents.domain.reminders.entities import Reminder
+from dacribagents.domain.reminders.enums import NotificationIntent, UrgencyLevel
+
+# ── Urgency / intent labels ─────────────────────────────────────────────────
+
+_URGENCY_ICON: dict[UrgencyLevel, str] = {
+    UrgencyLevel.CRITICAL: ":rotating_light:",
+    UrgencyLevel.URGENT: ":warning:",
+    UrgencyLevel.NORMAL: ":bell:",
+    UrgencyLevel.LOW: ":large_blue_circle:",
+}
+
+_INTENT_LABEL: dict[NotificationIntent, str] = {
+    NotificationIntent.REMINDER: "Reminder",
+    NotificationIntent.ALERT: "Alert",
+    NotificationIntent.DIGEST: "Digest",
+}
+
+
+# ── Public formatters ───────────────────────────────────────────────────────
+
+
+def format_reminder_list(reminders: list[Reminder], title: str) -> str:
+    """Format a list of reminders as a Slack mrkdwn block."""
+    if not reminders:
+        return f"*{title}*\nNo items found."
+
+    lines = [f"*{title}* ({len(reminders)} items)\n"]
+    for r in reminders:
+        icon = _URGENCY_ICON.get(r.urgency, ":bell:")
+        intent = _INTENT_LABEL.get(r.intent, r.intent.value)
+        lines.append(
+            f"{icon} *{r.subject}*  |  _{intent}_  |  `{r.state.value}`  |  source: {r.source.value}"
+        )
+    return "\n".join(lines)
+
+
+def format_approval_list(reminders: list[Reminder]) -> str:
+    """Format reminders waiting for approval."""
+    if not reminders:
+        return "*Reminders waiting for approval*\nAll clear — nothing pending."
+
+    lines = ["*Reminders waiting for approval* :clipboard:\n"]
+    for r in reminders:
+        icon = _URGENCY_ICON.get(r.urgency, ":bell:")
+        source = r.source_agent or r.source.value
+        lines.append(f"{icon} *{r.subject}*  |  from: _{source}_  |  created: {r.created_at:%Y-%m-%d %H:%M}")
+    return "\n".join(lines)
+
+
+def format_explanation(expl: ReminderExplanation) -> str:
+    """Format a reminder explanation."""
+    r = expl.reminder
+    lines = [
+        f"*{r.subject}*",
+        f"> {r.body}" if r.body else "",
+        "",
+        f"*State:* `{r.state.value}`  |  *Urgency:* {r.urgency.value}  |  *Intent:* {r.intent.value}",
+        f"*Source:* {expl.source_description}",
+        f"*Lifecycle:* {expl.lifecycle_summary}",
+    ]
+    if expl.approval_reason:
+        lines.append(f"*Approval required:* {expl.approval_reason}")
+    if expl.schedule:
+        s = expl.schedule
+        if s.fire_at:
+            lines.append(f"*Scheduled:* {s.fire_at:%Y-%m-%d %H:%M %Z}  ({s.schedule_type.value})")
+        elif s.cron_expression:
+            lines.append(f"*Recurring:* `{s.cron_expression}`")
+    if expl.targets:
+        target_strs = [t.target_type.value for t in expl.targets]
+        lines.append(f"*Targets:* {', '.join(target_strs)}")
+    return "\n".join(line for line in lines if line is not None)
+
+
+def format_draft_preview(preview: DraftPreview) -> str:
+    """Format a draft preview for Slack."""
+    icon = _URGENCY_ICON.get(preview.urgency, ":bell:")
+    intent = _INTENT_LABEL.get(preview.intent, preview.intent.value)
+    channels = ", ".join(c.value for c in preview.likely_channels)
+
+    lines = [
+        f"{icon} *Draft Preview*\n",
+        f"*Subject:* {preview.subject}",
+    ]
+    if preview.body:
+        lines.append(f"*Body:* {preview.body}")
+    lines.extend([
+        f"*Intent:* {intent}  |  *Urgency:* {preview.urgency.value}",
+        f"*Targets:* {preview.target_description}",
+    ])
+    if preview.schedule_description:
+        lines.append(f"*Schedule:* {preview.schedule_description}")
+    lines.append(f"*Likely channels:* {channels}")
+    if preview.requires_approval:
+        lines.append(f":lock: *Approval required:* {preview.approval_reason}")
+    else:
+        lines.append(":white_check_mark: No approval required — would schedule immediately.")
+    if preview.notes:
+        lines.append("\n_Notes:_")
+        for note in preview.notes:
+            lines.append(f"  • {note}")
+    return "\n".join(lines)
+
+
+def format_schedule_summary(summary: ScheduleSummary) -> str:
+    """Format a combined reminder + calendar summary."""
+    start = summary.date_range.start
+    end = summary.date_range.end
+
+    lines = [f"*Schedule: {start:%a %b %d} — {end:%a %b %d}*\n"]
+
+    if summary.calendar_events:
+        lines.append(f"*Calendar* ({len(summary.calendar_events)} events)")
+        for e in sorted(summary.calendar_events, key=lambda x: x.start):
+            time_str = "all day" if e.all_day else f"{e.start:%H:%M}–{e.end:%H:%M}"
+            lines.append(f"  :calendar: {time_str}  *{e.title}*")
+        lines.append("")
+
+    if summary.reminders:
+        lines.append(f"*Reminders* ({len(summary.reminders)} active)")
+        for r in summary.reminders:
+            icon = _URGENCY_ICON.get(r.urgency, ":bell:")
+            lines.append(f"  {icon} *{r.subject}*  `{r.state.value}`")
+    else:
+        lines.append("*Reminders:* None active.")
+
+    if not summary.calendar_events and not summary.reminders:
+        lines.append("Nothing scheduled — all clear!")
+
+    return "\n".join(lines)
+
+
+def format_calendar_conflicts(
+    events: list[CalendarEvent],
+    window_label: str,
+) -> str:
+    """Format calendar conflicts for a time window."""
+    if not events:
+        return f"*Conflicts for {window_label}:* None found — all clear!"
+
+    lines = [f"*Conflicts for {window_label}* ({len(events)} events)\n"]
+    for e in sorted(events, key=lambda x: x.start):
+        time_str = "all day" if e.all_day else f"{e.start:%H:%M}–{e.end:%H:%M}"
+        lines.append(f"  :calendar: {time_str}  *{e.title}*")
+    return "\n".join(lines)
