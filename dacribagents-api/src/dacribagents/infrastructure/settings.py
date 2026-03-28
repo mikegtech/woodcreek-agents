@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     kafka_security_protocol: str = "SASL_SSL"
     kafka_sasl_mechanism: str = "PLAIN"
     kafka_topic_raw: str = "lattice.mail.raw.v1"
+    kafka_topic_events: str = "woodcreek.events.v1"
 
     # =========================================================================
     # Lattice Integration

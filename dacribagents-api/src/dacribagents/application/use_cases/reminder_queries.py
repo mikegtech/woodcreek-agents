@@ -118,6 +118,16 @@ def list_active(
     return reminders
 
 
+def list_event_originated(
+    store: ReminderStore,
+    household_id: UUID,
+) -> list[Reminder]:
+    """Return non-terminal reminders that were created from upstream events."""
+    active_states = [s for s in ReminderState if s not in TERMINAL_STATES]
+    reminders, _ = store.list_reminders(household_id, states=active_states)
+    return [r for r in reminders if r.source_event_id is not None]
+
+
 def list_delivered(
     store: ReminderStore,
     household_id: UUID,

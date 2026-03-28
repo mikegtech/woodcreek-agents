@@ -180,16 +180,28 @@ Wire reminders to real outbound channels and support household/group dynamics.
 - [ ] Slack notification delivery adapter
 - [ ] Batch/digest mode: group low-priority reminders into daily/weekly household digests
 
-### Phase 4 — Event-Driven Household Orchestration
+### Phase 4 — Event-Driven Household Orchestration (in progress)
 Move from scheduled reminders to reactive, event-driven triggers across the agent ecosystem.
 
-- [ ] Event bus integration: agents emit events (e.g., `warranty.expiring`, `hoa.deadline.approaching`, `camera.offline`)
-- [ ] Reminder triggers: event → reminder creation rules (configurable per household)
-- [ ] Cross-agent reminder coordination: maintenance agent triggers reminder, compliance agent enriches it, delivery system sends it
+#### Phase 4A — Kafka Event Intake and Event-Driven Reminder Creation ✓
+- [x] Event intake service: deterministic mapping of upstream events → reminders with 4 supported event types (`warranty.expiring`, `hoa.deadline.approaching`, `camera.offline`, `maintenance.due`)
+- [x] `UpstreamEvent` model with severity-to-urgency mapping, source metadata preservation
+- [x] `ReminderEventConsumer`: Kafka consumer using `confluent_kafka.Consumer`, aligned with existing SASL_SSL pattern
+- [x] `KafkaEventPublisher`: Kafka-backed `EventPublisher` implementation using `confluent_kafka.Producer`
+- [x] Durable dedupe: `dedupe_key = "{event_type}:{event_id}"`, checked against non-terminal reminders, replay-safe
+- [x] Domain events published: `reminder.created_from_event`, `reminder.duplicate_ignored`
+- [x] HTTP event intake endpoint: `POST /internal/events/ingest` for dev/testing without Kafka
+- [x] Slack visibility: `event originated` / `from events` / `upstream` query command
+- [x] `list_event_originated()` query: filters reminders with `source_event_id != None`
+- [x] Settings: `kafka_topic_events = "woodcreek.events.v1"`
+- [x] Tests: 271 total (15 new) covering event mapping, severity override, dedupe/replay, cancel+re-create, event publishing, source metadata
+
+#### Phase 4 — Remaining
+- [ ] Cross-agent reminder coordination: maintenance agent triggers reminder, compliance agent enriches it
 - [ ] Calendar write-back: approved reminders optionally sync to WorkMail calendar (via CalendarAdapter)
-- [ ] Batch/digest mode: group low-priority reminders into daily or weekly household digests (delivered via email)
+- [ ] Batch/digest mode: group low-priority reminders into daily or weekly household digests
 - [ ] LangGraph workflow integration: reminder lifecycle as a durable LangGraph graph with checkpointing
-- [ ] Slack-native household schedule queries: `@woodcreek what does tomorrow look like?`, `@woodcreek who has conflicts Thursday night?`
+- [ ] Slack notification delivery adapter
 
 ### Phase 5 — Guardrailed Autonomy and Governance
 Allow agents limited autonomous action only after audit, approval, and guardrail infrastructure is proven.

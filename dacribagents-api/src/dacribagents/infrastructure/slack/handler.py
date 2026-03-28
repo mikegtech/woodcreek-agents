@@ -121,6 +121,9 @@ class SlackCommandHandler:
         if _matches(text, ["failed", "delivery failed"]):
             return self._handle_failed()
 
+        if _matches(text, ["event originated", "event created", "from events", "upstream"]):
+            return self._handle_event_originated()
+
         if _matches(text, ["deferred", "quiet hours", "suppressed"]):
             return self._handle_deferred()
 
@@ -177,6 +180,10 @@ class SlackCommandHandler:
             schedule_description=parsed.get("schedule"),
         )
         return SlackResponse(text=fmt.format_draft_preview(preview))
+
+    def _handle_event_originated(self) -> SlackResponse:
+        reminders = rq.list_event_originated(self.store, self.household_id)
+        return SlackResponse(text=fmt.format_reminder_list(reminders, "Event-Originated Reminders"))
 
     def _handle_deferred(self) -> SlackResponse:
         """Show reminders that were deferred (quiet hours, suppressed)."""
