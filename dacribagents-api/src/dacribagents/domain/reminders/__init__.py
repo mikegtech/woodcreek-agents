@@ -1,6 +1,7 @@
 """Household reminder orchestration domain."""
 
 from dacribagents.domain.reminders.entities import (
+    ApprovalRecord,
     CalendarAccessPolicy,
     CalendarIdentity,
     CalendarProvider,
@@ -18,6 +19,7 @@ from dacribagents.domain.reminders.entities import (
 )
 from dacribagents.domain.reminders.enums import (
     AckMethod,
+    ApprovalAction,
     CalendarAccessLevel,
     CalendarProviderType,
     DeliveryChannel,
@@ -44,6 +46,7 @@ from dacribagents.domain.reminders.lifecycle import (
 __all__ = [
     # Enums
     "AckMethod",
+    "ApprovalAction",
     "CalendarAccessLevel",
     "CalendarProviderType",
     "DeliveryChannel",
@@ -57,6 +60,7 @@ __all__ = [
     "TargetType",
     "UrgencyLevel",
     # Entities
+    "ApprovalRecord",
     "CalendarAccessPolicy",
     "CalendarIdentity",
     "CalendarProvider",

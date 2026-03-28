@@ -15,10 +15,22 @@ class InvalidTransitionError(Exception):
 
 
 # ── Valid transition map ────────────────────────────────────────────────────
-# Each key maps to the set of states reachable from it.
+#
+# Approval path:    DRAFT → PENDING_APPROVAL → APPROVED → SCHEDULED → ...
+# No-approval path: DRAFT → SCHEDULED → ...
 
 VALID_TRANSITIONS: dict[ReminderState, frozenset[ReminderState]] = {
     ReminderState.DRAFT: frozenset({
+        ReminderState.PENDING_APPROVAL,
+        ReminderState.SCHEDULED,
+        ReminderState.CANCELLED,
+    }),
+    ReminderState.PENDING_APPROVAL: frozenset({
+        ReminderState.APPROVED,
+        ReminderState.REJECTED,
+        ReminderState.CANCELLED,
+    }),
+    ReminderState.APPROVED: frozenset({
         ReminderState.SCHEDULED,
         ReminderState.CANCELLED,
     }),
@@ -42,12 +54,14 @@ VALID_TRANSITIONS: dict[ReminderState, frozenset[ReminderState]] = {
         ReminderState.CANCELLED,
     }),
     # Terminal states — no outbound transitions.
+    ReminderState.REJECTED: frozenset(),
     ReminderState.ACKNOWLEDGED: frozenset(),
     ReminderState.CANCELLED: frozenset(),
     ReminderState.FAILED: frozenset(),
 }
 
 TERMINAL_STATES: frozenset[ReminderState] = frozenset({
+    ReminderState.REJECTED,
     ReminderState.ACKNOWLEDGED,
     ReminderState.CANCELLED,
     ReminderState.FAILED,

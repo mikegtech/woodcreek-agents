@@ -9,6 +9,9 @@ class ReminderState(str, Enum):
     """Lifecycle states for a reminder."""
 
     DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
     SCHEDULED = "scheduled"
     PENDING_DELIVERY = "pending_delivery"
     DELIVERED = "delivered"
@@ -16,6 +19,14 @@ class ReminderState(str, Enum):
     SNOOZED = "snoozed"
     CANCELLED = "cancelled"
     FAILED = "failed"
+
+
+class ApprovalAction(str, Enum):
+    """Actions recorded in the approval audit trail."""
+
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class UrgencyLevel(str, Enum):

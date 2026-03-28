@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     source_agent        VARCHAR(255),
     source_event_id     VARCHAR(500),            -- correlation ID from the upstream event source
     dedupe_key          VARCHAR(500),            -- prevents duplicate reminders from the same event
-    state               VARCHAR(50)  NOT NULL DEFAULT 'draft',
+    state               VARCHAR(50)  NOT NULL DEFAULT 'draft',  -- draft | pending_approval | approved | rejected | scheduled | pending_delivery | delivered | acknowledged | snoozed | cancelled | failed
     requires_approval   BOOLEAN      NOT NULL DEFAULT false,
     created_by          UUID         NOT NULL,
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -162,6 +162,23 @@ CREATE TABLE IF NOT EXISTS reminder_acknowledgements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ra_delivery ON reminder_acknowledgements(delivery_id);
+
+-- ==========================================================================
+-- Approval Records
+-- ==========================================================================
+
+CREATE TABLE IF NOT EXISTS reminder_approval_records (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reminder_id     UUID         NOT NULL REFERENCES reminders(id),
+    action          VARCHAR(50)  NOT NULL,  -- submitted | approved | rejected
+    actor_id        UUID         NOT NULL,
+    reason          TEXT,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    metadata        JSONB        NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_rar_reminder ON reminder_approval_records(reminder_id);
+CREATE INDEX IF NOT EXISTS idx_rar_actor    ON reminder_approval_records(actor_id);
 
 -- ==========================================================================
 -- Preference Rules

@@ -54,7 +54,34 @@ def format_approval_list(reminders: list[Reminder]) -> str:
     for r in reminders:
         icon = _URGENCY_ICON.get(r.urgency, ":bell:")
         source = r.source_agent or r.source.value
-        lines.append(f"{icon} *{r.subject}*  |  from: _{source}_  |  created: {r.created_at:%Y-%m-%d %H:%M}")
+        short_id = str(r.id)[:8]
+        lines.append(
+            f"{icon} `{short_id}` *{r.subject}*  |  from: _{source}_"
+            f"  |  `{r.state.value}`  |  created: {r.created_at:%Y-%m-%d %H:%M}"
+        )
+    lines.append("\nUse `approve <id>` or `reject <id> <reason>` to act.")
+    return "\n".join(lines)
+
+
+def format_created_reminder(reminder: Reminder) -> str:
+    """Format a newly created reminder confirmation."""
+    icon = _URGENCY_ICON.get(reminder.urgency, ":bell:")
+    short_id = str(reminder.id)[:8]
+    return (
+        f"{icon} *Reminder created:* `{short_id}`\n"
+        f"*Subject:* {reminder.subject}\n"
+        f"*State:* `{reminder.state.value}`  |  *Approval required:* {'yes' if reminder.requires_approval else 'no'}"
+    )
+
+
+def format_approval_action(reminder: Reminder, action: str, reason: str | None = None) -> str:
+    """Format an approval/rejection confirmation."""
+    icon = ":white_check_mark:" if action == "approved" else ":no_entry_sign:"
+    short_id = str(reminder.id)[:8]
+    lines = [f"{icon} Reminder `{short_id}` *{reminder.subject}* has been *{action}*."]
+    lines.append(f"*New state:* `{reminder.state.value}`")
+    if reason:
+        lines.append(f"*Reason:* {reason}")
     return "\n".join(lines)
 
 

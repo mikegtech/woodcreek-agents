@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from dacribagents.domain.reminders.enums import (
     AckMethod,
+    ApprovalAction,
     DeliveryChannel,
     MemberRole,
     NotificationIntent,
@@ -117,6 +118,27 @@ class SnoozeReminderRequest(BaseModel):
     note: str | None = None
 
 
+class SubmitForApprovalRequest(BaseModel):
+    """Submit a draft reminder for human approval."""
+
+    actor_id: UUID
+    reason: str | None = None
+
+
+class ApproveReminderRequest(BaseModel):
+    """Approve a pending-approval reminder."""
+
+    actor_id: UUID
+    reason: str | None = None
+
+
+class RejectReminderRequest(BaseModel):
+    """Reject a pending-approval reminder."""
+
+    actor_id: UUID
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class EventIntakeRequest(BaseModel):
     """Intake a reminder from an upstream event source.
 
@@ -186,6 +208,17 @@ class ReminderResponse(BaseModel):
     updated_at: datetime
     targets: list[ReminderTargetResponse] = Field(default_factory=list)
     schedule: ReminderScheduleResponse | None = None
+
+
+class ApprovalRecordResponse(BaseModel):
+    """Serialized approval record."""
+
+    id: UUID
+    reminder_id: UUID
+    action: ApprovalAction
+    actor_id: UUID
+    reason: str | None
+    created_at: datetime
 
 
 class ReminderListResponse(BaseModel):

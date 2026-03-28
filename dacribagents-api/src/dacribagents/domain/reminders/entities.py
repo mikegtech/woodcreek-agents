@@ -9,6 +9,7 @@ from uuid import UUID
 
 from dacribagents.domain.reminders.enums import (
     AckMethod,
+    ApprovalAction,
     CalendarAccessLevel,
     CalendarProviderType,
     DeliveryChannel,
@@ -140,6 +141,19 @@ class ReminderAcknowledgement:
     acknowledged_at: datetime
     note: str | None = None
     snoozed_until: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalRecord:
+    """Audit record for approval lifecycle actions (submit, approve, reject)."""
+
+    id: UUID
+    reminder_id: UUID
+    action: ApprovalAction
+    actor_id: UUID
+    created_at: datetime
+    reason: str | None = None
+    metadata: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

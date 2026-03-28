@@ -75,9 +75,14 @@ def list_pending_approval(
     store: ReminderStore,
     household_id: UUID,
 ) -> list[Reminder]:
-    """Return reminders in DRAFT state that require approval."""
-    reminders, _ = store.list_reminders(household_id, states=[ReminderState.DRAFT])
-    return [r for r in reminders if r.requires_approval]
+    """Return reminders that are awaiting approval.
+
+    Includes DRAFT reminders flagged for approval and those in PENDING_APPROVAL.
+    """
+    reminders, _ = store.list_reminders(
+        household_id, states=[ReminderState.DRAFT, ReminderState.PENDING_APPROVAL],
+    )
+    return [r for r in reminders if r.requires_approval or r.state == ReminderState.PENDING_APPROVAL]
 
 
 def list_active_alerts(

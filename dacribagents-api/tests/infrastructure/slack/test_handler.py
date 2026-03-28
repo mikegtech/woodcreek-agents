@@ -218,3 +218,78 @@ def test_empty_store_approval(handler):
 def test_empty_store_alerts(handler):
     resp = handler.handle("<@U123> list active alerts")
     assert "No items" in resp.text
+
+
+# ── Write commands ──────────────────────────────────────────────────────────
+
+
+def test_create_reminder(handler, store, household_id):
+    resp = handler.handle("<@U123> create a reminder for the family about dentist appointment")
+    assert "created" in resp.text.lower() or "Reminder created" in resp.text
+    # Should have created a reminder in the store
+    reminders, total = store.list_reminders(household_id)
+    assert total >= 1
+    subjects = {r.subject for r in reminders}
+    assert "dentist appointment" in subjects
+
+
+def test_approve_reminder(handler, store, household_id, member_id):
+    _seed_reminders(store, household_id, member_id)
+    # Find the HOA reminder that needs approval and submit it
+    from dacribagents.application.use_cases.reminder_workflows import submit_for_approval
+    from dacribagents.domain.reminders.models import SubmitForApprovalRequest
+
+    pending = [r for r in store.reminders.values() if r.requires_approval]
+    assert len(pending) > 0
+    target = pending[0]
+    submit_for_approval(store, target.id, SubmitForApprovalRequest(actor_id=member_id))
+
+    short_id = str(target.id)[:8]
+    resp = handler.handle(f"<@U123> approve {short_id}")
+    assert "approved" in resp.text.lower()
+
+
+def test_reject_reminder(handler, store, household_id, member_id):
+    _seed_reminders(store, household_id, member_id)
+    from dacribagents.application.use_cases.reminder_workflows import submit_for_approval
+    from dacribagents.domain.reminders.models import SubmitForApprovalRequest
+
+    pending = [r for r in store.reminders.values() if r.requires_approval]
+    target = pending[0]
+    submit_for_approval(store, target.id, SubmitForApprovalRequest(actor_id=member_id))
+
+    short_id = str(target.id)[:8]
+    resp = handler.handle(f"<@U123> reject {short_id} because it is outdated")
+    assert "rejected" in resp.text.lower()
+    assert "outdated" in resp.text.lower()
+
+
+def test_approve_not_found(handler):
+    resp = handler.handle("<@U123> approve nonexistent")
+    assert "No reminder found" in resp.text
+
+
+def test_approve_wrong_state(handler, store, household_id, member_id):
+    """Approving a DRAFT (not yet submitted) should fail."""
+    _seed_reminders(store, household_id, member_id)
+    # Get a user-created reminder that doesn't need approval
+    user_reminders = [r for r in store.reminders.values() if not r.requires_approval]
+    if user_reminders:
+        short_id = str(user_reminders[0].id)[:8]
+        resp = handler.handle(f"<@U123> approve {short_id}")
+        assert "Cannot approve" in resp.text
+
+
+def test_pending_approval_shows_short_ids(handler, store, household_id, member_id):
+    _seed_reminders(store, household_id, member_id)
+    from dacribagents.application.use_cases.reminder_workflows import submit_for_approval
+    from dacribagents.domain.reminders.models import SubmitForApprovalRequest
+
+    pending = [r for r in store.reminders.values() if r.requires_approval]
+    for r in pending:
+        submit_for_approval(store, r.id, SubmitForApprovalRequest(actor_id=member_id))
+
+    resp = handler.handle("<@U123> show reminders waiting for approval")
+    # Should contain short IDs for actionability
+    assert "approve" in resp.text.lower()
+    assert "reject" in resp.text.lower()

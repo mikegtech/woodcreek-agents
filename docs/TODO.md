@@ -115,15 +115,27 @@ Give agents and the operator visibility into existing schedules and household co
 - [ ] Email-derived date extraction from existing RAG pipeline
 - [ ] Supervisor/agent routing integration for unrecognized Slack queries
 
-### Phase 2 — Reminder Authoring with Human Approval
+### Phase 2 — Reminder Authoring with Human Approval (in progress)
 Enable agents and users to create reminders, but require explicit human approval before anything is sent.
 
-- [ ] Reminder draft/create API: agents and Slack can create reminder drafts
-- [ ] Slack approval flow: agent-authored reminders surface in Slack for household member approval
-- [ ] Manual reminder creation via Slack (`@woodcreek remind the family about soccer at 5`), SMS, or CLI
-- [ ] Scheduling engine: cron-like recurring reminders, one-shot reminders, relative-time reminders ("3 days before X")
-- [ ] Reminder editing, snooze, and cancellation with full audit trail
-- [ ] Household-level and individual targeting from the start (e.g., "remind the household" vs. "remind Mike")
+#### Phase 2A — APIs and Human-in-the-Loop Approval Workflows ✓
+- [x] Approval lifecycle states: `pending_approval`, `approved`, `rejected` added to state machine
+- [x] Approval path: DRAFT → PENDING_APPROVAL → APPROVED → SCHEDULED (or REJECTED, terminal)
+- [x] `ApprovalRecord` entity for audit trail (who submitted/approved/rejected, when, why)
+- [x] `ApprovalPolicy` service — deterministic evaluation of whether a reminder needs approval
+- [x] Write workflows: `submit_for_approval`, `approve_reminder`, `reject_reminder`, `get_approval_history`
+- [x] Schedule gating: `schedule_reminder` raises `ApprovalRequiredError` if approval is needed but not granted
+- [x] Slack write commands: `create a reminder ...`, `approve <id>`, `reject <id> <reason>`
+- [x] Approval list shows short IDs for actionable approve/reject commands
+- [x] `reminder_approval_records` table in PostgreSQL schema
+- [x] Tests: 205 total (44 new) covering approval workflows, policy, Slack commands, lifecycle transitions
+
+#### Phase 2B — Remaining
+- [ ] Scheduling engine: cron-like recurring reminders, relative-time reminders ("3 days before X")
+- [ ] Reminder editing, snooze, and cancellation with full audit trail via Slack
+- [ ] Household-level and individual targeting in Slack commands (e.g., "remind Mike" vs. "remind the household")
+- [ ] Slack interactive messages (buttons) for inline approve/reject
+- [ ] Manual reminder creation via SMS or CLI
 
 ### Phase 3 — Multi-Channel Delivery and Family Context
 Wire reminders to real outbound channels and support household/group dynamics.

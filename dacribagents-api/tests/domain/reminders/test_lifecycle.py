@@ -6,9 +6,9 @@ import pytest
 
 from dacribagents.domain.reminders.enums import ReminderState
 from dacribagents.domain.reminders.lifecycle import (
-    InvalidTransitionError,
     TERMINAL_STATES,
     VALID_TRANSITIONS,
+    InvalidTransitionError,
     can_transition,
     is_terminal,
     reachable_states,
@@ -30,8 +30,17 @@ def test_all_states_have_transition_entry():
 @pytest.mark.parametrize(
     ("current", "target"),
     [
+        # No-approval path
         (ReminderState.DRAFT, ReminderState.SCHEDULED),
         (ReminderState.DRAFT, ReminderState.CANCELLED),
+        # Approval path
+        (ReminderState.DRAFT, ReminderState.PENDING_APPROVAL),
+        (ReminderState.PENDING_APPROVAL, ReminderState.APPROVED),
+        (ReminderState.PENDING_APPROVAL, ReminderState.REJECTED),
+        (ReminderState.PENDING_APPROVAL, ReminderState.CANCELLED),
+        (ReminderState.APPROVED, ReminderState.SCHEDULED),
+        (ReminderState.APPROVED, ReminderState.CANCELLED),
+        # Delivery path
         (ReminderState.SCHEDULED, ReminderState.PENDING_DELIVERY),
         (ReminderState.SCHEDULED, ReminderState.CANCELLED),
         (ReminderState.PENDING_DELIVERY, ReminderState.DELIVERED),
@@ -60,14 +69,18 @@ def test_valid_transition(current: ReminderState, target: ReminderState):
         (ReminderState.SCHEDULED, ReminderState.DRAFT),
         (ReminderState.DELIVERED, ReminderState.SCHEDULED),
         (ReminderState.ACKNOWLEDGED, ReminderState.DELIVERED),
+        (ReminderState.APPROVED, ReminderState.PENDING_APPROVAL),
         # Can't skip states
         (ReminderState.DRAFT, ReminderState.DELIVERED),
         (ReminderState.DRAFT, ReminderState.ACKNOWLEDGED),
         (ReminderState.SCHEDULED, ReminderState.ACKNOWLEDGED),
+        (ReminderState.PENDING_APPROVAL, ReminderState.SCHEDULED),  # must go through APPROVED
         # Terminal states can't transition
         (ReminderState.ACKNOWLEDGED, ReminderState.CANCELLED),
         (ReminderState.CANCELLED, ReminderState.DRAFT),
         (ReminderState.FAILED, ReminderState.PENDING_DELIVERY),
+        (ReminderState.REJECTED, ReminderState.DRAFT),
+        (ReminderState.REJECTED, ReminderState.APPROVED),
         # Self-transitions not allowed
         (ReminderState.DRAFT, ReminderState.DRAFT),
         (ReminderState.DELIVERED, ReminderState.DELIVERED),
@@ -86,6 +99,7 @@ def test_invalid_transition(current: ReminderState, target: ReminderState):
 
 def test_terminal_states_are_correct():
     assert TERMINAL_STATES == frozenset({
+        ReminderState.REJECTED,
         ReminderState.ACKNOWLEDGED,
         ReminderState.CANCELLED,
         ReminderState.FAILED,
@@ -116,6 +130,26 @@ def test_non_terminal_state_has_outbound(state: ReminderState):
 )
 def test_cancel_reachable_from_all_non_terminal(state: ReminderState):
     assert can_transition(state, ReminderState.CANCELLED)
+
+
+# ── Approval path ───────────────────────────────────────────────────────────
+
+
+def test_approval_path():
+    """DRAFT -> PENDING_APPROVAL -> APPROVED -> SCHEDULED is valid."""
+    validate_transition(ReminderState.DRAFT, ReminderState.PENDING_APPROVAL)
+    validate_transition(ReminderState.PENDING_APPROVAL, ReminderState.APPROVED)
+    validate_transition(ReminderState.APPROVED, ReminderState.SCHEDULED)
+
+
+def test_rejection_is_terminal():
+    validate_transition(ReminderState.PENDING_APPROVAL, ReminderState.REJECTED)
+    assert is_terminal(ReminderState.REJECTED)
+
+
+def test_cannot_skip_approval_to_scheduled():
+    """PENDING_APPROVAL -> SCHEDULED is invalid — must go through APPROVED."""
+    assert not can_transition(ReminderState.PENDING_APPROVAL, ReminderState.SCHEDULED)
 
 
 # ── Snooze cycle ────────────────────────────────────────────────────────────

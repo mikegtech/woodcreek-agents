@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from dacribagents.domain.reminders.entities import (
+    ApprovalRecord,
     Household,
     HouseholdMember,
     PreferenceRule,
@@ -41,6 +42,7 @@ class InMemoryReminderStore:
         self.executions: dict[UUID, ReminderExecution] = {}
         self.deliveries: dict[UUID, list[ReminderDelivery]] = {}
         self.acknowledgements: dict[UUID, ReminderAcknowledgement] = {}
+        self.approval_records: dict[UUID, list[ApprovalRecord]] = {}
         self.households: dict[UUID, Household] = {}
         self.members: dict[UUID, HouseholdMember] = {}
         self.preference_rules: list[PreferenceRule] = []
@@ -139,6 +141,15 @@ class InMemoryReminderStore:
 
     def get_acknowledgement(self, delivery_id: UUID) -> ReminderAcknowledgement | None:
         return self.acknowledgements.get(delivery_id)
+
+    # ── Approval Records ───────────────────────────────────────────────
+
+    def create_approval_record(self, record: ApprovalRecord) -> ApprovalRecord:
+        self.approval_records.setdefault(record.reminder_id, []).append(record)
+        return record
+
+    def get_approval_records(self, reminder_id: UUID) -> list[ApprovalRecord]:
+        return self.approval_records.get(reminder_id, [])
 
     # ── Preferences ─────────────────────────────────────────────────────
 

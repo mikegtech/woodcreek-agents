@@ -6,6 +6,7 @@ from typing import Protocol
 from uuid import UUID
 
 from dacribagents.domain.reminders.entities import (
+    ApprovalRecord,
     Household,
     HouseholdMember,
     PreferenceRule,
@@ -99,6 +100,14 @@ class ReminderStore(Protocol):
         ...
 
     def get_acknowledgement(self, delivery_id: UUID) -> ReminderAcknowledgement | None:  # noqa: D102
+        ...
+
+    # ── Approval Records ───────────────────────────────────────────────
+
+    def create_approval_record(self, record: ApprovalRecord) -> ApprovalRecord:  # noqa: D102
+        ...
+
+    def get_approval_records(self, reminder_id: UUID) -> list[ApprovalRecord]:  # noqa: D102
         ...
 
     # ── Preferences ─────────────────────────────────────────────────────

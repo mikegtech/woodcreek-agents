@@ -9,18 +9,17 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-# ── Ports used by these workflows ──────────────────────────────────────────
-# In production, these are injected. The use-case functions accept them as
-# arguments so they stay decoupled from infrastructure.
 from dacribagents.application.ports.reminder_store import ReminderStore
+from dacribagents.application.services import approval_policy
 from dacribagents.domain.reminders.entities import (
+    ApprovalRecord,
     Reminder,
     ReminderAcknowledgement,
     ReminderSchedule,
     ReminderTarget,
 )
 from dacribagents.domain.reminders.enums import (
-    ReminderSource,
+    ApprovalAction,
     ReminderState,
 )
 from dacribagents.domain.reminders.lifecycle import (
@@ -28,10 +27,13 @@ from dacribagents.domain.reminders.lifecycle import (
 )
 from dacribagents.domain.reminders.models import (
     AcknowledgeReminderRequest,
+    ApproveReminderRequest,
     CreateReminderRequest,
     EventIntakeRequest,
+    RejectReminderRequest,
     ScheduleReminderRequest,
     SnoozeReminderRequest,
+    SubmitForApprovalRequest,
     UpdateReminderRequest,
 )
 
@@ -53,6 +55,14 @@ class DuplicateReminderError(Exception):
         super().__init__(f"Reminder with dedupe_key {dedupe_key!r} already exists: {existing_id}")
 
 
+class ApprovalRequiredError(Exception):
+    """Raised when trying to schedule a reminder that needs approval first."""
+
+    def __init__(self, reminder_id: UUID) -> None:
+        self.reminder_id = reminder_id
+        super().__init__(f"Reminder {reminder_id} requires approval before scheduling")
+
+
 # ── Workflow functions ──────────────────────────────────────────────────────
 
 
@@ -64,18 +74,19 @@ def create_reminder(
 ) -> Reminder:
     """Create a new reminder draft with targets and optional schedule.
 
-    Returns the persisted reminder in DRAFT state (or SCHEDULED if a schedule
-    is provided and the source is USER).
+    The approval policy determines whether the reminder needs approval.
+    If no approval is needed and a schedule is provided, transitions
+    directly to SCHEDULED.
     """
     now = datetime.now(UTC)
     reminder_id = uuid4()
 
-    # Domain-specific sources (maintenance, hoa, warranty, telemetry) always
-    # require approval — same as AGENT.  Only USER skips by default.
-    needs_approval = request.requires_approval or request.source not in {
-        ReminderSource.USER,
-        ReminderSource.HOUSEHOLD_ROUTINE,
-    }
+    decision = approval_policy.evaluate(
+        source=request.source,
+        urgency=request.urgency,
+        requires_approval_override=request.requires_approval,
+        source_agent=request.source_agent,
+    )
 
     reminder = Reminder(
         id=reminder_id,
@@ -89,7 +100,7 @@ def create_reminder(
         source_event_id=request.source_event_id,
         dedupe_key=request.dedupe_key,
         state=ReminderState.DRAFT,
-        requires_approval=needs_approval,
+        requires_approval=decision.required,
         created_by=created_by,
         created_at=now,
         updated_at=now,
@@ -108,9 +119,8 @@ def create_reminder(
     ]
     store.set_targets(reminder_id, targets)
 
-    # If a schedule is provided and the reminder doesn't need approval,
-    # transition directly to SCHEDULED.
-    if request.schedule and not needs_approval:
+    # If a schedule is provided and no approval needed, auto-schedule.
+    if request.schedule and not decision.required:
         schedule = _build_schedule(reminder_id, request.schedule)
         store.set_schedule(schedule)
         reminder = store.update_reminder_state(reminder_id, ReminderState.SCHEDULED)
@@ -118,51 +128,12 @@ def create_reminder(
     return reminder
 
 
-def ingest_event(
-    store: ReminderStore,
-    request: EventIntakeRequest,
-) -> Reminder:
-    """Intake a reminder from an upstream event source.
-
-    This is the entry point for event-driven producers (solar telemetry,
-    maintenance agents, HOA compliance, warranty tracking, IoT sensors).
-
-    - If ``dedupe_key`` is set and a non-terminal reminder with that key
-      already exists, raises ``DuplicateReminderError``.
-    - All event-originated reminders require approval (no autonomy yet).
-    - Returns the created reminder in DRAFT state.
-    """
-    if request.dedupe_key:
-        existing = store.find_by_dedupe_key(request.household_id, request.dedupe_key)
-        if existing is not None:
-            raise DuplicateReminderError(request.dedupe_key, existing.id)
-
-    create_req = CreateReminderRequest(
-        subject=request.subject,
-        body=request.body,
-        urgency=request.urgency,
-        intent=request.intent,
-        source=request.source,
-        source_agent=request.source_agent,
-        source_event_id=request.source_event_id,
-        dedupe_key=request.dedupe_key,
-        targets=request.targets,
-        schedule=request.schedule,
-        requires_approval=True,
-    )
-    # Use a system UUID as created_by for event-originated reminders.
-    return create_reminder(store, request.household_id, request.household_id, create_req)
-
-
 def update_reminder(
     store: ReminderStore,
     reminder_id: UUID,
     request: UpdateReminderRequest,
 ) -> Reminder:
-    """Update a draft reminder's mutable fields.
-
-    Only allowed in DRAFT state.
-    """
+    """Update a draft reminder's mutable fields. Only allowed in DRAFT state."""
     reminder = _get_or_raise(store, reminder_id)
     if reminder.state != ReminderState.DRAFT:
         raise ReminderStateError(f"Cannot update reminder in {reminder.state.value!r} state; must be DRAFT")
@@ -197,13 +168,83 @@ def update_reminder(
     return updated
 
 
+def submit_for_approval(
+    store: ReminderStore,
+    reminder_id: UUID,
+    request: SubmitForApprovalRequest,
+) -> Reminder:
+    """Submit a draft reminder for human approval. DRAFT -> PENDING_APPROVAL."""
+    reminder = _get_or_raise(store, reminder_id)
+    validate_transition(reminder.state, ReminderState.PENDING_APPROVAL)
+
+    store.create_approval_record(ApprovalRecord(
+        id=uuid4(),
+        reminder_id=reminder_id,
+        action=ApprovalAction.SUBMITTED,
+        actor_id=request.actor_id,
+        created_at=datetime.now(UTC),
+        reason=request.reason,
+    ))
+    return store.update_reminder_state(reminder_id, ReminderState.PENDING_APPROVAL)
+
+
+def approve_reminder(
+    store: ReminderStore,
+    reminder_id: UUID,
+    request: ApproveReminderRequest,
+) -> Reminder:
+    """Approve a pending-approval reminder. PENDING_APPROVAL -> APPROVED."""
+    reminder = _get_or_raise(store, reminder_id)
+    validate_transition(reminder.state, ReminderState.APPROVED)
+
+    store.create_approval_record(ApprovalRecord(
+        id=uuid4(),
+        reminder_id=reminder_id,
+        action=ApprovalAction.APPROVED,
+        actor_id=request.actor_id,
+        created_at=datetime.now(UTC),
+        reason=request.reason,
+    ))
+    return store.update_reminder_state(reminder_id, ReminderState.APPROVED)
+
+
+def reject_reminder(
+    store: ReminderStore,
+    reminder_id: UUID,
+    request: RejectReminderRequest,
+) -> Reminder:
+    """Reject a pending-approval reminder. PENDING_APPROVAL -> REJECTED (terminal)."""
+    reminder = _get_or_raise(store, reminder_id)
+    validate_transition(reminder.state, ReminderState.REJECTED)
+
+    store.create_approval_record(ApprovalRecord(
+        id=uuid4(),
+        reminder_id=reminder_id,
+        action=ApprovalAction.REJECTED,
+        actor_id=request.actor_id,
+        created_at=datetime.now(UTC),
+        reason=request.reason,
+    ))
+    return store.update_reminder_state(reminder_id, ReminderState.REJECTED)
+
+
 def schedule_reminder(
     store: ReminderStore,
     reminder_id: UUID,
     request: ScheduleReminderRequest,
 ) -> Reminder:
-    """Attach a schedule to a draft and transition DRAFT -> SCHEDULED."""
+    """Attach a schedule and transition to SCHEDULED.
+
+    Valid from DRAFT (if no approval needed) or APPROVED (after approval).
+    Raises ApprovalRequiredError if the reminder needs approval but is still
+    in DRAFT state.
+    """
     reminder = _get_or_raise(store, reminder_id)
+
+    # Block: DRAFT → SCHEDULED when approval is required
+    if reminder.state == ReminderState.DRAFT and reminder.requires_approval:
+        raise ApprovalRequiredError(reminder_id)
+
     validate_transition(reminder.state, ReminderState.SCHEDULED)
 
     schedule = _build_schedule(reminder_id, request.schedule)
@@ -226,13 +267,10 @@ def acknowledge_reminder(
     reminder_id: UUID,
     request: AcknowledgeReminderRequest,
 ) -> Reminder:
-    """Acknowledge a delivered reminder and transition to ACKNOWLEDGED."""
+    """Acknowledge a delivered reminder. DELIVERED -> ACKNOWLEDGED."""
     reminder = _get_or_raise(store, reminder_id)
     validate_transition(reminder.state, ReminderState.ACKNOWLEDGED)
 
-    # Find the most recent delivery for this member to link the ack.
-    # In a full implementation this would query by member + execution.
-    # For Phase 0 we record the ack with a placeholder delivery lookup.
     ack = ReminderAcknowledgement(
         id=uuid4(),
         delivery_id=uuid4(),  # resolved by store in production
@@ -250,11 +288,7 @@ def snooze_reminder(
     reminder_id: UUID,
     request: SnoozeReminderRequest,
 ) -> Reminder:
-    """Snooze a delivered reminder. Transitions DELIVERED -> SNOOZED.
-
-    The snooze_until timestamp is recorded; a scheduler (Phase 2+) will
-    transition SNOOZED -> PENDING_DELIVERY when the interval elapses.
-    """
+    """Snooze a delivered reminder. DELIVERED -> SNOOZED."""
     reminder = _get_or_raise(store, reminder_id)
     validate_transition(reminder.state, ReminderState.SNOOZED)
 
@@ -288,6 +322,44 @@ def list_reminders(  # noqa: PLR0913
         limit=limit,
         offset=offset,
     )
+
+
+def get_approval_history(
+    store: ReminderStore,
+    reminder_id: UUID,
+) -> list[ApprovalRecord]:
+    """Return approval audit records for a reminder."""
+    _get_or_raise(store, reminder_id)
+    return store.get_approval_records(reminder_id)
+
+
+def ingest_event(
+    store: ReminderStore,
+    request: EventIntakeRequest,
+) -> Reminder:
+    """Intake a reminder from an upstream event source.
+
+    Checks dedupe, then creates as a draft requiring approval.
+    """
+    if request.dedupe_key:
+        existing = store.find_by_dedupe_key(request.household_id, request.dedupe_key)
+        if existing is not None:
+            raise DuplicateReminderError(request.dedupe_key, existing.id)
+
+    create_req = CreateReminderRequest(
+        subject=request.subject,
+        body=request.body,
+        urgency=request.urgency,
+        intent=request.intent,
+        source=request.source,
+        source_agent=request.source_agent,
+        source_event_id=request.source_event_id,
+        dedupe_key=request.dedupe_key,
+        targets=request.targets,
+        schedule=request.schedule,
+        requires_approval=True,
+    )
+    return create_reminder(store, request.household_id, request.household_id, create_req)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
