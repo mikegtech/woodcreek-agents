@@ -272,10 +272,22 @@ Allow agents limited autonomous action only after audit, approval, and guardrail
 - [x] Slack commands: `timeline reminder`, `anomalies/flags`
 - [x] Tests: 368 total (10 new) covering timeline, anomaly rules, health check
 
-#### Phase 5 — Production Hardening Remaining
-- [ ] Wire `PostgresReminderStore` into production FastAPI lifespan (replace InMemoryReminderStore)
-- [ ] Wire `GovernanceState` persistence to governance PostgreSQL tables
-- [ ] Database migration tooling (Alembic or equivalent)
+#### Phase 6A — Production Wiring and Deployment Foundations ✓
+- [x] `ReminderRuntime` container: selects PostgresReminderStore (production/staging) or InMemoryReminderStore (dev) based on environment + Postgres availability
+- [x] `_store.py` bridge rewritten to use `ReminderRuntime` — all Slack/HTTP endpoints use runtime container
+- [x] `PostgresGovernanceStore`: reads/writes tier, kill-switch, budget counters, mute state from governance PostgreSQL tables
+- [x] Schema migration: `setup_reminder_schema(conn)` runs during lifespan startup (idempotent DDL)
+- [x] Scheduler background task: `asyncio.create_task(run_scheduler_loop())` in FastAPI lifespan, 60s interval, clean cancellation on shutdown
+- [x] Kafka event publisher wiring: `KafkaEventPublisher` used when `kafka_enabled`, falls back to `NoOpEventPublisher`
+- [x] Structured logging: `reminder_log_context()` context manager with correlation IDs via `contextvars`, `configure_structured_logging()` in lifespan
+- [x] `.env.example` with all required environment variables documented
+- [x] `GET /health/subsystems` registered in router
+- [x] Tests: 377 total (9 new) covering runtime selection, store bridge, correlation IDs, scheduler skip, governance store import
+
+#### Production Remaining
+- [ ] Alembic migration versioning (currently using idempotent DDL — sufficient for single-deployment but needs versioning for schema evolution)
+- [ ] Docker Compose service entries for reminder subsystem
+- [ ] Production deployment runbook
 
 ---
 

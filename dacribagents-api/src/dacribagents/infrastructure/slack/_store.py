@@ -1,32 +1,28 @@
-"""Household store provider for Slack integration.
+"""Household store provider — bridges Slack/HTTP endpoints to the reminder runtime.
 
-In Phase 1 this returns a placeholder in-memory store and mock calendar.
-When a PostgreSQL-backed ReminderStore is implemented, replace this with
-a real provider wired through the application container.
+In production, returns the PostgresReminderStore from the runtime container.
+In dev/test, falls back to InMemoryReminderStore.
 """
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from dacribagents.infrastructure.calendar.mock_adapter import MockCalendarAdapter
-from dacribagents.infrastructure.reminders.in_memory_store import InMemoryReminderStore
+from dacribagents.infrastructure.reminders.runtime import get_runtime
 
 _DEFAULT_HOUSEHOLD_ID = UUID("00000000-0000-0000-0000-000000000001")
 
-_store: InMemoryReminderStore | None = None
-_calendar: MockCalendarAdapter | None = None
 
+def get_household_store() -> tuple:
+    """Return (store, calendar, household_id) from the runtime container."""
+    rt = get_runtime()
+    if rt.store is None:
+        # Runtime not initialized yet — create a dev fallback
+        from dacribagents.infrastructure.calendar.mock_adapter import MockCalendarAdapter  # noqa: PLC0415
+        from dacribagents.infrastructure.reminders.in_memory_store import InMemoryReminderStore  # noqa: PLC0415
 
-def get_household_store() -> tuple[InMemoryReminderStore, MockCalendarAdapter, UUID]:
-    """Return (store, calendar, household_id) for the Slack handler.
+        rt.store = InMemoryReminderStore()
+        rt.calendar = MockCalendarAdapter()
+        rt.household_id = _DEFAULT_HOUSEHOLD_ID
 
-    Returns singleton in-memory instances.  The HTTP endpoint will
-    eventually source these from the application container / DI root.
-    """
-    global _store, _calendar  # noqa: PLW0603
-    if _store is None:
-        _store = InMemoryReminderStore()
-    if _calendar is None:
-        _calendar = MockCalendarAdapter()
-    return _store, _calendar, _DEFAULT_HOUSEHOLD_ID
+    return rt.store, rt.calendar, rt.household_id
