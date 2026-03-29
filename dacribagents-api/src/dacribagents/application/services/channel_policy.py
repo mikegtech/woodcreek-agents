@@ -158,6 +158,7 @@ def _default_selection(  # noqa: PLR0911
         if email:
             return ChannelSelection(member_id=member_id, primary_channel=DeliveryChannel.EMAIL, primary_address=email)
 
+    # Normal / low urgency: email primary, SMS fallback
     if email:
         return ChannelSelection(
             member_id=member_id, primary_channel=DeliveryChannel.EMAIL, primary_address=email,

@@ -64,11 +64,16 @@ class SmtpEmailAdapter:
 
         try:
             with smtplib.SMTP_SSL(self._host, self._port, timeout=30) as smtp:
+                smtp.set_debuglevel(0)
                 if self._user:
+                    logger.debug(f"SMTP login as {self._user} to {self._host}:{self._port}")
                     smtp.login(self._user, self._password)
-                smtp.send_message(msg)
+                result = smtp.send_message(msg)
+                logger.info(
+                    f"Email sent to {recipient_address}, message_id={message_id}, "
+                    f"smtp_result={result}, from={self._from}"
+                )
 
-            logger.info(f"Email sent to {recipient_address}, message_id={message_id}")
             return DeliveryResult(
                 status=DeliveryStatus.DELIVERED,
                 provider_message_id=message_id,
