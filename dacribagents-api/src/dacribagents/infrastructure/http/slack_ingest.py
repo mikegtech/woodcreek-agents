@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from collections import OrderedDict
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
@@ -21,6 +22,23 @@ from loguru import logger
 from dacribagents.infrastructure.settings import get_settings
 
 router = APIRouter()
+
+# ── Event deduplication ─────────────────────────────────────────────────────
+# Slack retries events when our response takes >3s. Cache recent event IDs
+# to ignore duplicates. Bounded to 500 entries (~5 min of heavy traffic).
+
+_seen_events: OrderedDict[str, float] = OrderedDict()
+_SEEN_MAX = 500
+
+
+def _is_duplicate_event(event_id: str) -> bool:
+    """Return True if this event_id was already processed."""
+    if event_id in _seen_events:
+        return True
+    _seen_events[event_id] = time.time()
+    if len(_seen_events) > _SEEN_MAX:
+        _seen_events.popitem(last=False)
+    return False
 
 
 # ── Signature verification ──────────────────────────────────────────────────
@@ -116,6 +134,12 @@ async def slack_events(
     if payload.get("type") == "event_callback":
         event = payload.get("event", {})
         event_type = event.get("type")
+        event_id = payload.get("event_id", "") or event.get("client_msg_id", "") or event.get("ts", "")
+
+        # Dedupe: ignore Slack retries for the same event
+        if _is_duplicate_event(event_id):
+            logger.debug(f"Duplicate Slack event ignored: {event_id}")
+            return {"status": "duplicate"}
 
         if event_type == "app_mention":
             background_tasks.add_task(

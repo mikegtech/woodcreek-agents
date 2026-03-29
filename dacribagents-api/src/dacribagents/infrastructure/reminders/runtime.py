@@ -59,6 +59,10 @@ class ReminderRuntime:
             self.event_publisher = NoOpEventPublisher()
             logger.info("Kafka not configured — using NoOpEventPublisher")
 
+        # Load governance state from PostgreSQL if available
+        if settings.environment in {"staging", "production"} or self._postgres_available():
+            self._load_governance_state()
+
         logger.info(
             f"Reminder runtime initialized: store={type(self.store).__name__}, "
             f"publisher={type(self.event_publisher).__name__}"
@@ -90,6 +94,21 @@ class ReminderRuntime:
 
         logger.info("Using InMemoryReminderStore (dev mode)")
         return InMemoryReminderStore()
+
+    def _load_governance_state(self) -> None:
+        """Load governance tiers/kill-switch/mutes from PostgreSQL into the in-memory singleton."""
+        try:
+            from dacribagents.application.services.governance import get_governance_state  # noqa: PLC0415
+            from dacribagents.infrastructure import get_postgres_client  # noqa: PLC0415
+            from dacribagents.infrastructure.reminders.governance_store import PostgresGovernanceStore  # noqa: PLC0415
+
+            conn = get_postgres_client().connection
+            gov_store = PostgresGovernanceStore(conn)
+            state = get_governance_state()
+            gov_store.load_state(state, self.household_id)
+            logger.info(f"Governance state loaded from PostgreSQL: tier={state.get_tier(self.household_id).value}")
+        except Exception as e:
+            logger.warning(f"Governance state load failed (using defaults): {e}")
 
     def _create_kafka_publisher(self) -> EventPublisher:
         try:
