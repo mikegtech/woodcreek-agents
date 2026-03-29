@@ -330,6 +330,19 @@ Allow agents limited autonomous action only after audit, approval, and guardrail
 
 ---
 
+#### Phase 9 — Slack Intent Gateway and Reminder Interaction Graph ✓
+- [x] Typed interaction contracts: `ParsedIntent` with `IntentType` enum (12 intent types), `TargetScope`, entity fields for subject/member/schedule/urgency/short-id
+- [x] LLM intent classifier: single LLM call → structured JSON → `ParsedIntent` contract; uses `create_llm()` at temperature=0
+- [x] Deterministic validator: member resolution, subject validation, schedule parsing, ambiguity detection with focused clarification questions
+- [x] Schedule parser: handles "at 5pm", "at 5", "at 3:30pm", "tomorrow morning", "in 30 minutes", auto-PM for small numbers, next-day rollover
+- [x] Deterministic router: maps validated `ParsedIntent` → existing workflow functions (create, snooze, cancel, approve, reject, queries, governance, calendar, suggestions)
+- [x] LangGraph interaction graph: classify → validate → route → END (3 nodes, no loops)
+- [x] Slack endpoint wired: `_process_app_mention` now calls `run_interaction()` instead of keyword handler
+- [x] Natural language support: "remind Mike to pick up groceries at 5", "tell the family about trash night", "what reminders are pending?"
+- [x] Tests: 428 unit (17 new) covering schedule parsing, validation, routing, clarification, query mapping
+
+---
+
 ## iPhone App & Push Notification Evolution
 
 The long-term primary household UX is a native iPhone app with APNs push notifications. Everyone in the household is on iPhone, making native push the natural acknowledgment and notification surface.

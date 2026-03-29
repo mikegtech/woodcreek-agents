@@ -56,17 +56,26 @@ async def _process_app_mention(
     # Lazy import to avoid circular deps and allow testing with stubs.
     from dacribagents.infrastructure.slack._store import get_household_store  # noqa: PLC0415
     from dacribagents.infrastructure.slack.client import get_slack_client  # noqa: PLC0415
-    from dacribagents.infrastructure.slack.handler import SlackCommandHandler  # noqa: PLC0415
 
     try:
         store, calendar, household_id = get_household_store()
-        handler = SlackCommandHandler(store=store, calendar=calendar, household_id=household_id)
-        response = handler.handle(text)
+
+        # Use LLM-based interaction graph for natural language
+        from dacribagents.application.interaction.graph import run_interaction  # noqa: PLC0415
+        from dacribagents.infrastructure.logging import reminder_log_context  # noqa: PLC0415
+
+        with reminder_log_context(household_id=household_id, operation="slack_interaction"):
+            response_text = run_interaction(
+                text=text,
+                store=store,
+                household_id=household_id,
+                actor_id=household_id,  # default actor; member resolution happens inside
+            )
 
         client = get_slack_client()
         await client.post_message(
             channel=channel,
-            text=response.text,
+            text=response_text,
             thread_ts=thread_ts or event_ts,
         )
         logger.info(f"Slack response sent to {channel} for user {user}")

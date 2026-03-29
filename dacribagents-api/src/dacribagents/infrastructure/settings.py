@@ -96,7 +96,25 @@ class Settings(BaseSettings):
 
     # Local vLLM (for local inference)
     vllm_base_url: str = "http://localhost:8000/v1"
-    vllm_model_name: str = "gpt-oss-20b"
+    vllm_model_name: str = "nvcr-gpt-oss-20b"
+
+    # Router model (fast intent classification — can be on separate server)
+    vllm_router_base_url: str | None = None  # Falls back to vllm_base_url
+    vllm_router_model_name: str = "vllm-mistral-7b"
+    vllm_router_temperature: float = 0.0
+    vllm_router_max_tokens: int = 256
+
+    # Tool planner (tool-calling model — separate vLLM port)
+    vllm_tool_planner_base_url: str = "http://localhost:8001/v1"
+    vllm_tool_planner_model_name: str = "qwen2.5-14b-instruct"
+    tool_planner_temperature: float = 0.0
+    tool_planner_max_tokens: int = 512
+
+    # Agent temperature
+    agent_temperature: float = 0.1
+
+    # Tool binding global kill switch
+    enable_llm_tool_binding: bool = False
 
     # =========================================================================
     # Embeddings

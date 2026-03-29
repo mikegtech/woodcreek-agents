@@ -11,9 +11,9 @@ services:
       - CLOUDFLARE_EMAIL=${CLOUDFLARE_EMAIL}
       - CLOUDFLARE_DNS_API_TOKEN=${CLOUDFLARE_DNS_API_TOKEN}
     ports:
-      - "8880:80"
-      - "8443:443"
-      - "8881:8080"  # Dashboard
+      - "100.71.224.45:8880:80"
+      - "100.71.224.45:8443:443"
+      - "100.71.224.45:8881:8080"  # Dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
@@ -51,10 +51,18 @@ services:
     volumes:
       - sqlite_data:/app/data
     environment:
+      # LLM — Tailscale-internal vLLM endpoints only
       LLM_PROVIDER: local
-      VLLM_BASE_URL: http://100.71.224.45:8000/v1
-      VLLM_MODEL_NAME: gpt-oss-20b
-      MILVUS_HOST: 100.103.47.127 # woodcreek-milvus
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-http://100.71.224.45:8000/v1}
+      VLLM_MODEL_NAME: ${VLLM_MODEL_NAME:-nvcr-gpt-oss-20b}
+      VLLM_ROUTER_BASE_URL: ${VLLM_ROUTER_BASE_URL:-http://100.65.183.110:8000/v1}
+      VLLM_ROUTER_MODEL_NAME: ${VLLM_ROUTER_MODEL_NAME:-vllm-mistral-7b}
+      VLLM_TOOL_PLANNER_BASE_URL: ${VLLM_TOOL_PLANNER_BASE_URL:-http://100.71.224.45:8001/v1}
+      VLLM_TOOL_PLANNER_MODEL_NAME: ${VLLM_TOOL_PLANNER_MODEL_NAME:-qwen2.5-14b-instruct}
+      AGENT_TEMPERATURE: ${AGENT_TEMPERATURE:-0.1}
+      ENABLE_LLM_TOOL_BINDING: ${ENABLE_LLM_TOOL_BINDING:-false}
+      # Infrastructure
+      MILVUS_HOST: 100.103.47.127
       MILVUS_PORT: 19530
       POSTGRES_HOST: woodcreek-postgres
       POSTGRES_PORT: 5432
@@ -63,6 +71,7 @@ services:
       POSTGRES_DB: woodcreek_agents
       ENVIRONMENT: production
       LOG_LEVEL: INFO
+      LANGGRAPH_ENABLED: ${LANGGRAPH_ENABLED:-false}
       # Reminder platform
       TELNYX_API_KEY: ${TELNYX_API_KEY}
       TELNYX_FROM_NUMBER: ${TELNYX_FROM_NUMBER}
@@ -79,6 +88,7 @@ services:
       KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME}
       KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD}
       KAFKA_TOPIC_EVENTS: ${KAFKA_TOPIC_EVENTS:-woodcreek.events.v1}
+      KAFKA_CONSUMER_GROUP: ${KAFKA_CONSUMER_GROUP:-woodcreek-reminder-group}
       WORKMAIL_EWS_EMAIL: ${WORKMAIL_EWS_EMAIL}
       WORKMAIL_EWS_PASSWORD: ${WORKMAIL_EWS_PASSWORD}
       WORKMAIL_EWS_REGION: ${WORKMAIL_EWS_REGION:-us-east-1}
@@ -104,8 +114,8 @@ services:
       - minio_data:/data
     command: minio server /data --console-address ":9001"
     ports:
-      - "9102:9000"
-      - "9101:9001"
+      - "100.71.224.45:9102:9000"
+      - "100.71.224.45:9101:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -129,7 +139,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"
+      - "100.71.224.45:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U woodcreek -d woodcreek_agents"]
       interval: 10s
