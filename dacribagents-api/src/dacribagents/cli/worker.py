@@ -236,24 +236,25 @@ def get_mailboxes_from_env() -> list[MailboxConfig]:
     if mailbox_names:
         # Multi-mailbox mode
         for name in mailbox_names.split(","):
-            name = name.strip().upper()
-            email = os.getenv(f"WORKMAIL_{name}_EMAIL")
-            password = os.getenv(f"WORKMAIL_{name}_PASSWORD")
-            folder = os.getenv(f"WORKMAIL_{name}_FOLDER", "INBOX")
-            email_alias = os.getenv(f"WORKMAIL_{name}_EMAIL_ALIAS")
+            raw_name = name.strip()
+            env_key = raw_name.upper().replace("-", "_")
+            email = os.getenv(f"WORKMAIL_{env_key}_EMAIL")
+            password = os.getenv(f"WORKMAIL_{env_key}_PASSWORD")
+            folder = os.getenv(f"WORKMAIL_{env_key}_FOLDER", "INBOX")
+            email_alias = os.getenv(f"WORKMAIL_{env_key}_EMAIL_ALIAS")
             
             if email and password:
                 mailboxes.append(MailboxConfig(
-                    name=name.lower(),
+                    name=raw_name.lower(),
                     email=email,
                     password=password,
                     folder=folder,
                     email_alias=email_alias,
                 ))
                 alias_info = f" (alias: {email_alias})" if email_alias else ""
-                logger.info(f"Configured mailbox: {name.lower()} ({email}){alias_info}")
+                logger.info(f"Configured mailbox: {raw_name.lower()} ({email}){alias_info}")
             else:
-                logger.warning(f"Mailbox {name} missing email or password, skipping")
+                logger.warning(f"Mailbox {raw_name} missing email or password, skipping")
     
     else:
         # Single mailbox mode (legacy)

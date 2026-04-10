@@ -451,7 +451,7 @@ def create_mailboxes_from_env() -> list[MailboxConfig]:
     
     for name in mailbox_names:
         name = name.strip()
-        prefix = f"WORKMAIL_{name.upper()}_"
+        prefix = f"WORKMAIL_{name.upper().replace('-', '_')}_"
         
         email = os.environ.get(f"{prefix}EMAIL")
         password = os.environ.get(f"{prefix}PASSWORD")
