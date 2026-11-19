@@ -204,6 +204,9 @@ class MailboxConfig:
     email_alias: str  # For To/CC filtering
     account_id: str   # Lattice account ID
     folder: str = "INBOX"
+    imap_host: str = "imap.mail.us-east-1.awsapps.com"
+    imap_port: int = 993
+    imap_timeout_seconds: int = 15
     target_folder: Optional[str] = None  # Move processed emails here
     
     def __post_init__(self):
@@ -305,6 +308,9 @@ class EmailWorkerLattice:
             email=config.email,
             password=config.password,
             folder=config.folder,
+            host=config.imap_host,
+            port=config.imap_port,
+            timeout_seconds=config.imap_timeout_seconds,
         )
         
         source = WorkMailImapEmailSource(imap_config)
@@ -446,30 +452,43 @@ def create_publisher_from_env() -> "LatticeKafkaPublisher":
 
 def create_mailboxes_from_env() -> list[MailboxConfig]:
     """Create mailbox configs from environment variables."""
-    mailbox_names = os.getenv("WORKMAIL_MAILBOXES", "agents").split(",")
+    # The new EMAIL_* configuration is provider-neutral. Legacy WORKMAIL_* still works.
+    modern_names = os.getenv("EMAIL_MAILBOXES")
+    names = (modern_names or os.getenv("WORKMAIL_MAILBOXES", "agents")).split(",")
     mailboxes = []
-    
-    for name in mailbox_names:
+
+    for name in names:
         name = name.strip()
-        prefix = f"WORKMAIL_{name.upper().replace('-', '_')}_"
-        
-        email = os.environ.get(f"{prefix}EMAIL")
-        password = os.environ.get(f"{prefix}PASSWORD")
-        
+        if not name:
+            continue
+        suffix = name.upper().replace("-", "_")
+        modern = f"EMAIL_{suffix}_"
+        legacy = f"WORKMAIL_{suffix}_"
+
+        def option(key: str, default: str = "") -> str:
+            return os.getenv(modern + key) or os.getenv(legacy + key) or default
+
+        email = option("EMAIL")
+        password = option("PASSWORD")
         if not email or not password:
             logger.warning(f"Skipping mailbox {name}: missing EMAIL or PASSWORD")
             continue
-        
+
+        # Preserve the prior identity for existing WorkMail configurations.
+        default_id = f"imap-{name}" if modern_names is not None else f"workmail-{name}"
         mailboxes.append(MailboxConfig(
             name=name,
             email=email,
             password=password,
-            email_alias=os.getenv(f"{prefix}EMAIL_ALIAS", email),
-            account_id=os.getenv(f"{prefix}ACCOUNT_ID", f"workmail-{name}"),
-            folder=os.getenv(f"{prefix}FOLDER", "INBOX"),
-            target_folder=os.getenv(f"{prefix}TARGET_FOLDER", name),
+            email_alias=option("EMAIL_ALIAS", email),
+            account_id=option("ACCOUNT_ID", default_id),
+            folder=option("FOLDER", "INBOX"),
+            imap_host=option("IMAP_HOST", "imap.mail.us-east-1.awsapps.com"),
+            imap_port=int(option("IMAP_PORT", "993")),
+            imap_timeout_seconds=int(option("IMAP_TIMEOUT_SECONDS", "15")),
+            target_folder=option("TARGET_FOLDER", name),
         ))
-    
+
     return mailboxes
 
 
@@ -539,6 +558,9 @@ def backfill():
         email=config.email,
         password=config.password,
         folder=args.folder,
+        host=config.imap_host,
+        port=config.imap_port,
+        timeout_seconds=config.imap_timeout_seconds,
     )
     
     source = WorkMailImapEmailSource(imap_config)
