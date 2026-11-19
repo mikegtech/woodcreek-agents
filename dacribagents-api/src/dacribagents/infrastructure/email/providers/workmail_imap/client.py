@@ -22,6 +22,7 @@ class WorkMailImapConfig:
     host: str = WORKMAIL_IMAP_HOST
     port: int = WORKMAIL_IMAP_PORT
     timeout_seconds: int = 15
+    destination_folder_override: str | None = None
 
     def __post_init__(self) -> None:
         if not self.host or any(char.isspace() for char in self.host):
@@ -33,8 +34,8 @@ class WorkMailImapConfig:
 
     @property
     def target_folder(self) -> str:
-        """Folder based on email local part: agents@woodcreek.me → agents"""
-        return self.email.split("@")[0]
+        """Return the configured destination or the login address's local part."""
+        return self.destination_folder_override or self.email.split("@")[0]
 
 
 class WorkMailImapEmailSource(EmailSource):

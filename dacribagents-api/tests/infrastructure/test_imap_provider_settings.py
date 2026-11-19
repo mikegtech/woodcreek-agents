@@ -6,11 +6,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dacribagents.application.ports.email_source import RawEmail
+from dacribagents.cli.email_worker_lattice import (
+    EmailWorkerLattice,
+    MailboxConfig,
+    create_mailboxes_from_env,
+)
 from dacribagents.infrastructure.email.providers.workmail_imap.client import (
     WorkMailImapConfig,
     WorkMailImapEmailSource,
 )
-from dacribagents.cli.email_worker_lattice import create_mailboxes_from_env
 
 
 def test_default_workmail_config_unchanged():
@@ -69,6 +74,121 @@ def test_provider_neutral_and_legacy_mailboxes(monkeypatch):
     assert result[0].target_folder == "family"
     assert result[1].imap_host == "imap.mail.us-east-1.awsapps.com"
     assert result[1].account_id == "existing-identity"
+
+
+def test_workmail_and_zoho_mailboxes_are_combined():
+    with patch.dict("os.environ", {
+        "WORKMAIL_MAILBOXES": "agents",
+        "WORKMAIL_AGENTS_EMAIL": "agents@example.invalid",
+        "WORKMAIL_AGENTS_PASSWORD": "workmail-secret",
+        "ZOHO_LOGAN_ROCKWALL_EMAIL": "login@example.invalid",
+        "ZOHO_LOGAN_ROCKWALL_PASSWORD": "zoho-secret",
+        "ZOHO_LOGAN_ROCKWALL_EMAIL_ALIAS": "logan@woodcreek.me",
+    }, clear=True):
+        result = create_mailboxes_from_env()
+
+    assert [(mailbox.name, mailbox.imap_host) for mailbox in result] == [
+        ("agents", "imap.mail.us-east-1.awsapps.com"),
+        ("logan-rockwall", "imappro.zoho.com"),
+    ]
+    assert result[0].account_id == "workmail-agents"
+    assert result[1].account_id == "zoho-logan-rockwall"
+    assert result[1].email_alias == "logan@woodcreek.me"
+
+
+def test_configured_target_folder_is_used():
+    cfg = WorkMailImapConfig(
+        region="us-east-1",
+        email="login@example.invalid",
+        password="synthetic",
+        destination_folder_override="Processed",
+    )
+
+    assert cfg.target_folder == "Processed"
+
+
+@pytest.mark.parametrize(
+    ("remaining", "delivery_errors"),
+    [
+        (1, []),
+        (0, ["broker unavailable"]),
+    ],
+)
+def test_mailbox_is_not_modified_without_confirmed_delivery(remaining, delivery_errors):
+    publisher = MagicMock()
+    publisher.publish.return_value = "message-id"
+    publisher.flush.return_value = remaining
+    publisher.get_errors.return_value = delivery_errors
+    source = MagicMock()
+    source.fetch_unprocessed.return_value = [
+        (
+            42,
+            RawEmail(
+                provider="imap",
+                account="login@example.invalid",
+                folder="INBOX",
+                uid=42,
+                rfc822_bytes=b"To: logan@woodcreek.me\r\nSubject: test\r\n\r\nbody",
+            ),
+        )
+    ]
+
+    with patch(
+        "dacribagents.cli.email_worker_lattice.WorkMailImapEmailSource",
+        return_value=source,
+    ):
+        worker = EmailWorkerLattice(mailboxes=[], publisher=publisher)
+        result = worker._process_mailbox(MailboxConfig(
+            name="logan-rockwall",
+            email="login@example.invalid",
+            password="synthetic",
+            email_alias="logan@woodcreek.me",
+            account_id="zoho-logan-rockwall",
+            target_folder="logan-rockwall",
+        ))
+
+    assert result == (0, 0, 1)
+    source.mark_processed.assert_not_called()
+    source.disconnect.assert_called_once_with()
+
+
+def test_mailbox_is_modified_after_confirmed_delivery():
+    publisher = MagicMock()
+    publisher.publish.return_value = "message-id"
+    publisher.flush.return_value = 0
+    publisher.get_errors.return_value = []
+    source = MagicMock()
+    source.fetch_unprocessed.return_value = [
+        (
+            42,
+            RawEmail(
+                provider="imap",
+                account="login@example.invalid",
+                folder="INBOX",
+                uid=42,
+                rfc822_bytes=b"To: logan@woodcreek.me\r\nSubject: test\r\n\r\nbody",
+            ),
+        )
+    ]
+    source.mark_processed.return_value = True
+
+    with patch(
+        "dacribagents.cli.email_worker_lattice.WorkMailImapEmailSource",
+        return_value=source,
+    ):
+        worker = EmailWorkerLattice(mailboxes=[], publisher=publisher)
+        result = worker._process_mailbox(MailboxConfig(
+            name="logan-rockwall",
+            email="login@example.invalid",
+            password="synthetic",
+            email_alias="logan@woodcreek.me",
+            account_id="zoho-logan-rockwall",
+            target_folder="logan-rockwall",
+        ))
+
+    assert result == (1, 0, 0)
+    source.mark_processed.assert_called_once_with(42)
+    source.disconnect.assert_called_once_with()
 
 
 def test_legacy_mailbox_account_id_retained():

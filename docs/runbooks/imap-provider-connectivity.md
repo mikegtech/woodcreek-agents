@@ -18,25 +18,24 @@ The test reports TLS/auth success, a read-only mailbox count, and optional folde
 **Provider-neutral worker configuration (for future activation):**
 
 ```dotenv
-EMAIL_MAILBOXES=family,backup
-EMAIL_FAMILY_EMAIL=mailbox@example.invalid
-EMAIL_FAMILY_PASSWORD=<local-secret>
-EMAIL_FAMILY_EMAIL_ALIAS=family@example.invalid
-EMAIL_FAMILY_ACCOUNT_ID=imap-family
-EMAIL_FAMILY_FOLDER=INBOX
-EMAIL_FAMILY_TARGET_FOLDER=family
-EMAIL_FAMILY_IMAP_HOST=imappro.zoho.com
-EMAIL_FAMILY_IMAP_PORT=993
-EMAIL_FAMILY_IMAP_TIMEOUT_SECONDS=15
+ZOHO_MAILBOXES=family
+ZOHO_FAMILY_EMAIL=mailbox@example.invalid
+ZOHO_FAMILY_PASSWORD=<local-secret>
+ZOHO_FAMILY_EMAIL_ALIAS=family@example.invalid
+ZOHO_FAMILY_ACCOUNT_ID=imap-family
+ZOHO_FAMILY_FOLDER=INBOX
+ZOHO_FAMILY_TARGET_FOLDER=family
+ZOHO_FAMILY_IMAP_HOST=imappro.zoho.com
+ZOHO_FAMILY_IMAP_PORT=993
+ZOHO_FAMILY_IMAP_TIMEOUT_SECONDS=15
 
-EMAIL_BACKUP_EMAIL=backup@example.invalid
-EMAIL_BACKUP_PASSWORD=<local-secret>
-EMAIL_BACKUP_IMAP_HOST=imap.other-provider.invalid
-EMAIL_BACKUP_IMAP_PORT=993
+WORKMAIL_MAILBOXES=backup
+WORKMAIL_BACKUP_EMAIL=backup@example.invalid
+WORKMAIL_BACKUP_PASSWORD=<local-secret>
 ```
 
-The existing `WORKMAIL_MAILBOXES` and `WORKMAIL_<NAME>_*` variables remain supported. In the initial PR, provider-specific host and port are configurable independently for each mailbox; WorkMail remains the fallback when unspecified. Do not commit `.env` or credentials.
+The `WORKMAIL_MAILBOXES` and `ZOHO_MAILBOXES` lists are combined. Provider-specific host and port are configurable independently for each mailbox; Zoho defaults to `imappro.zoho.com:993` while WorkMail retains its existing endpoint. Do not commit `.env` or credentials.
 
-**Stop before live processing:** The existing worker moves messages before verifying Kafka's asynchronous delivery outcome, and the destination folder is currently derived from login local-part instead of the configured alias. Both must be corrected and reviewed before enabling live family-record ingestion. The smoke test does not certify child routing or evidence custody.
+The worker now waits for Kafka's asynchronous delivery callback before moving messages and honors the configured target folder. The smoke test still does not certify child routing or evidence custody.
 
 Sources: [Zoho IMAP account settings](https://www.zoho.com/mail/help/imap-access.html).
