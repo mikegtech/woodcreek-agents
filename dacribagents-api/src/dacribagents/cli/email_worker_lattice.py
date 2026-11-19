@@ -331,7 +331,7 @@ class EmailWorkerLattice:
                     message_id = self.publisher.publish(
                         rfc822_bytes=raw.rfc822_bytes,
                         account_id=config.account_id,
-                        alias=config.name,
+                        alias=config.email_alias.split("@")[0],
                         provider_message_id=f"{config.email}:{uid}",
                         folder=config.folder,
                     )
@@ -592,7 +592,7 @@ def backfill():
                 message_id = publisher.publish(
                     rfc822_bytes=rfc822_bytes,
                     account_id=config.account_id,
-                    alias=config.name,
+                    alias=config.email_alias.split("@")[0],
                     provider_message_id=f"{config.email}:{uid_str}",
                     folder=args.folder,
                 )
