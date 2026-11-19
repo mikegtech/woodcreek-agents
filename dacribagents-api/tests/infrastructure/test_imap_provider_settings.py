@@ -10,6 +10,7 @@ from dacribagents.application.ports.email_source import RawEmail
 from dacribagents.cli.email_worker_lattice import (
     EmailWorkerLattice,
     MailboxConfig,
+    _check_recipient_match_static,
     create_mailboxes_from_env,
 )
 from dacribagents.infrastructure.email.providers.workmail_imap.client import (
@@ -105,6 +106,17 @@ def test_configured_target_folder_is_used():
     )
 
     assert cfg.target_folder == "Processed"
+
+
+@pytest.mark.parametrize("header", ["To", "Cc"])
+def test_recipient_match_handles_multiple_addresses(header):
+    raw = (
+        f"To: primary@example.invalid\r\n"
+        f"{header}: First <first@example.invalid>, Alias <logan@woodcreek.me>\r\n"
+        "\r\nbody"
+    ).encode()
+
+    assert _check_recipient_match_static(raw, "logan@woodcreek.me")
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
+from email.utils import getaddresses
 from typing import Optional
 
 from confluent_kafka import Producer, KafkaError
@@ -269,24 +270,8 @@ class EmailWorkerLattice:
     def _check_recipient_match(self, rfc822_bytes: bytes, alias: str) -> bool:
         """Check if email is addressed to the alias."""
         try:
-            em = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
-            
-            # Get To and CC addresses
-            to_addrs = em.get_all("To") or []
-            cc_addrs = em.get_all("Cc") or []
-            
-            # Extract email addresses
-            def extract_email(addr_str: str) -> str:
-                if "<" in addr_str and ">" in addr_str:
-                    return addr_str.split("<")[1].split(">")[0].lower()
-                return addr_str.strip().lower()
-            
-            all_recipients = []
-            for addr in to_addrs + cc_addrs:
-                all_recipients.append(extract_email(str(addr)))
-            
             filter_addr = self._extract_recipient_filter(alias)
-            return filter_addr in all_recipients
+            return filter_addr in _recipient_addresses(rfc822_bytes)
             
         except Exception as e:
             logger.warning(f"Failed to parse email for recipient check: {e}")
@@ -668,23 +653,26 @@ def backfill():
 def _check_recipient_match_static(rfc822_bytes: bytes, alias: str) -> bool:
     """Static version of recipient check for backfill."""
     try:
-        em = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
-        
-        to_addrs = em.get_all("To") or []
-        cc_addrs = em.get_all("Cc") or []
-        
-        def extract_email(addr_str: str) -> str:
-            if "<" in addr_str and ">" in addr_str:
-                return addr_str.split("<")[1].split(">")[0].lower()
-            return addr_str.strip().lower()
-        
-        all_recipients = [extract_email(str(addr)) for addr in to_addrs + cc_addrs]
-        
         filter_addr = alias.lower() if "@" in alias else f"{alias.lower()}@woodcreek.me"
-        return filter_addr in all_recipients
+        return filter_addr in _recipient_addresses(rfc822_bytes)
         
     except Exception:
         return False
+
+
+def _recipient_addresses(rfc822_bytes: bytes) -> set[str]:
+    """Extract all addresses from the To and Cc headers."""
+    message = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
+    header_values = [
+        str(value)
+        for header in ("To", "Cc")
+        for value in (message.get_all(header) or [])
+    ]
+    return {
+        address.lower().strip()
+        for _, address in getaddresses(header_values)
+        if address.strip()
+    }
 
 
 if __name__ == "__main__":
