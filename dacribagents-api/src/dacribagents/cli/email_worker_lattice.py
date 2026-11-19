@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
+from email.utils import getaddresses
 from typing import Optional
 
 from confluent_kafka import Producer, KafkaError
@@ -204,6 +205,9 @@ class MailboxConfig:
     email_alias: str  # For To/CC filtering
     account_id: str   # Lattice account ID
     folder: str = "INBOX"
+    imap_host: str = "imap.mail.us-east-1.awsapps.com"
+    imap_port: int = 993
+    imap_timeout_seconds: int = 15
     target_folder: Optional[str] = None  # Move processed emails here
     
     def __post_init__(self):
@@ -266,24 +270,8 @@ class EmailWorkerLattice:
     def _check_recipient_match(self, rfc822_bytes: bytes, alias: str) -> bool:
         """Check if email is addressed to the alias."""
         try:
-            em = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
-            
-            # Get To and CC addresses
-            to_addrs = em.get_all("To") or []
-            cc_addrs = em.get_all("Cc") or []
-            
-            # Extract email addresses
-            def extract_email(addr_str: str) -> str:
-                if "<" in addr_str and ">" in addr_str:
-                    return addr_str.split("<")[1].split(">")[0].lower()
-                return addr_str.strip().lower()
-            
-            all_recipients = []
-            for addr in to_addrs + cc_addrs:
-                all_recipients.append(extract_email(str(addr)))
-            
             filter_addr = self._extract_recipient_filter(alias)
-            return filter_addr in all_recipients
+            return filter_addr in _recipient_addresses(rfc822_bytes)
             
         except Exception as e:
             logger.warning(f"Failed to parse email for recipient check: {e}")
@@ -299,12 +287,15 @@ class EmailWorkerLattice:
         logger.info(f"  Recipient filter: {config.email_alias}")
         
         # Create IMAP source
-        # Note: WorkMailImapConfig.target_folder is a computed property from email
         imap_config = WorkMailImapConfig(
             region="us-east-1",
             email=config.email,
             password=config.password,
             folder=config.folder,
+            host=config.imap_host,
+            port=config.imap_port,
+            timeout_seconds=config.imap_timeout_seconds,
+            destination_folder_override=config.target_folder,
         )
         
         source = WorkMailImapEmailSource(imap_config)
@@ -318,6 +309,8 @@ class EmailWorkerLattice:
             skipped = 0
             errors = 0
             
+            published_uids: list[int] = []
+
             for uid, raw in emails:
                 try:
                     # Check recipient filter
@@ -338,9 +331,7 @@ class EmailWorkerLattice:
                     
                     logger.info(f"  Published UID {uid} as {message_id}")
                     
-                    # Mark as processed in IMAP
-                    source.mark_processed(uid)
-                    published += 1
+                    published_uids.append(uid)
                     
                 except Exception as e:
                     logger.error(f"  Failed to process UID {uid}: {e}")
@@ -350,13 +341,27 @@ class EmailWorkerLattice:
             remaining = self.publisher.flush(timeout=10.0)
             if remaining > 0:
                 logger.warning(f"  {remaining} messages still pending after flush")
+                errors += remaining
             
             # Check for delivery errors
             kafka_errors = self.publisher.get_errors()
             if kafka_errors:
                 logger.error(f"  Kafka delivery errors: {kafka_errors}")
                 errors += len(kafka_errors)
-            
+
+            if remaining == 0 and not kafka_errors:
+                for uid in published_uids:
+                    if source.mark_processed(uid):
+                        published += 1
+                    else:
+                        logger.error(f"  Kafka accepted UID {uid}, but it could not be marked processed")
+                        errors += 1
+            elif published_uids:
+                logger.error(
+                    f"  Not marking {len(published_uids)} email(s) processed because Kafka delivery "
+                    "was not confirmed"
+                )
+
             return published, skipped, errors
             
         finally:
@@ -446,30 +451,60 @@ def create_publisher_from_env() -> "LatticeKafkaPublisher":
 
 def create_mailboxes_from_env() -> list[MailboxConfig]:
     """Create mailbox configs from environment variables."""
-    mailbox_names = os.getenv("WORKMAIL_MAILBOXES", "agents").split(",")
-    mailboxes = []
-    
-    for name in mailbox_names:
-        name = name.strip()
-        prefix = f"WORKMAIL_{name.upper().replace('-', '_')}_"
-        
-        email = os.environ.get(f"{prefix}EMAIL")
-        password = os.environ.get(f"{prefix}PASSWORD")
-        
-        if not email or not password:
+    names: list[str] = []
+    for list_name in ("EMAIL_MAILBOXES", "WORKMAIL_MAILBOXES", "ZOHO_MAILBOXES"):
+        configured_names = os.getenv(list_name, "")
+        names.extend(name.strip() for name in configured_names.split(",") if name.strip())
+
+    # A ZOHO_<MAILBOX>_EMAIL entry is sufficient to activate a Zoho mailbox.
+    for key in os.environ:
+        if key.startswith("ZOHO_") and key.endswith("_EMAIL"):
+            name = key.removeprefix("ZOHO_").removesuffix("_EMAIL").lower().replace("_", "-")
+            names.append(name)
+
+    names = list(dict.fromkeys(names or ["agents"]))
+    mailboxes: list[MailboxConfig] = []
+
+    for name in names:
+        suffix = name.upper().replace("-", "_")
+        prefixes = tuple(
+            f"{provider}_{suffix}_"
+            for provider in ("EMAIL", "ZOHO", "WORKMAIL")
+        )
+
+        selected_prefix = next(
+            (
+                prefix for prefix in prefixes
+                if os.getenv(prefix + "EMAIL") and os.getenv(prefix + "PASSWORD")
+            ),
+            None,
+        )
+        if selected_prefix is None:
             logger.warning(f"Skipping mailbox {name}: missing EMAIL or PASSWORD")
             continue
-        
+
+        def option(key: str, default: str = "") -> str:
+            return os.getenv(selected_prefix + key) or default
+
+        email = option("EMAIL")
+        password = option("PASSWORD")
+        selected_provider = selected_prefix.split("_", 1)[0]
+        default_host = "imappro.zoho.com" if selected_provider == "ZOHO" else "imap.mail.us-east-1.awsapps.com"
+        account_provider = "imap" if selected_provider == "EMAIL" else selected_provider.lower()
+        default_id = f"{account_provider}-{name}"
         mailboxes.append(MailboxConfig(
             name=name,
             email=email,
             password=password,
-            email_alias=os.getenv(f"{prefix}EMAIL_ALIAS", email),
-            account_id=os.getenv(f"{prefix}ACCOUNT_ID", f"workmail-{name}"),
-            folder=os.getenv(f"{prefix}FOLDER", "INBOX"),
-            target_folder=os.getenv(f"{prefix}TARGET_FOLDER", name),
+            email_alias=option("EMAIL_ALIAS", email),
+            account_id=option("ACCOUNT_ID", default_id),
+            folder=option("FOLDER", "INBOX"),
+            imap_host=option("IMAP_HOST", default_host),
+            imap_port=int(option("IMAP_PORT", "993")),
+            imap_timeout_seconds=int(option("IMAP_TIMEOUT_SECONDS", "15")),
+            target_folder=option("TARGET_FOLDER", name),
         ))
-    
+
     return mailboxes
 
 
@@ -539,6 +574,10 @@ def backfill():
         email=config.email,
         password=config.password,
         folder=args.folder,
+        host=config.imap_host,
+        port=config.imap_port,
+        timeout_seconds=config.imap_timeout_seconds,
+        destination_folder_override=config.target_folder,
     )
     
     source = WorkMailImapEmailSource(imap_config)
@@ -614,23 +653,26 @@ def backfill():
 def _check_recipient_match_static(rfc822_bytes: bytes, alias: str) -> bool:
     """Static version of recipient check for backfill."""
     try:
-        em = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
-        
-        to_addrs = em.get_all("To") or []
-        cc_addrs = em.get_all("Cc") or []
-        
-        def extract_email(addr_str: str) -> str:
-            if "<" in addr_str and ">" in addr_str:
-                return addr_str.split("<")[1].split(">")[0].lower()
-            return addr_str.strip().lower()
-        
-        all_recipients = [extract_email(str(addr)) for addr in to_addrs + cc_addrs]
-        
         filter_addr = alias.lower() if "@" in alias else f"{alias.lower()}@woodcreek.me"
-        return filter_addr in all_recipients
+        return filter_addr in _recipient_addresses(rfc822_bytes)
         
     except Exception:
         return False
+
+
+def _recipient_addresses(rfc822_bytes: bytes) -> set[str]:
+    """Extract all addresses from the To and Cc headers."""
+    message = BytesParser(policy=policy.default).parsebytes(rfc822_bytes)
+    header_values = [
+        str(value)
+        for header in ("To", "Cc")
+        for value in (message.get_all(header) or [])
+    ]
+    return {
+        address.lower().strip()
+        for _, address in getaddresses(header_values)
+        if address.strip()
+    }
 
 
 if __name__ == "__main__":

@@ -149,8 +149,8 @@ services:
       - woodcreek_net
   # =============================================================================
   # EMAIL WORKER - Multi-Mailbox Email Ingestion Service
-  # All WORKMAIL_* and KAFKA_* config loaded from .env
-  # To add a mailbox: update WORKMAIL_MAILBOXES and add WORKMAIL_{NAME}_* vars in .env
+  # All WORKMAIL_*, ZOHO_*, EMAIL_*, and KAFKA_* config loaded from .env
+  # WorkMail and Zoho mailbox lists are processed together.
   # =============================================================================
   email-worker:
     build:

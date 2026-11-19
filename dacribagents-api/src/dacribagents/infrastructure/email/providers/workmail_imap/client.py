@@ -1,5 +1,6 @@
 from __future__ import annotations
 import imaplib
+import ssl
 from dataclasses import dataclass
 from typing import Optional
 
@@ -18,11 +19,23 @@ class WorkMailImapConfig:
     email: str
     password: str
     folder: str = "INBOX"
+    host: str = WORKMAIL_IMAP_HOST
+    port: int = WORKMAIL_IMAP_PORT
+    timeout_seconds: int = 15
+    destination_folder_override: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.host or any(char.isspace() for char in self.host):
+            raise ValueError("Invalid IMAP hostname")
+        if not 1 <= self.port <= 65535:
+            raise ValueError("IMAP port out of range")
+        if self.timeout_seconds < 1:
+            raise ValueError("IMAP timeout must be positive")
 
     @property
     def target_folder(self) -> str:
-        """Folder based on email local part: agents@woodcreek.me → agents"""
-        return self.email.split("@")[0]
+        """Return the configured destination or the login address's local part."""
+        return self.destination_folder_override or self.email.split("@")[0]
 
 
 class WorkMailImapEmailSource(EmailSource):
@@ -32,8 +45,17 @@ class WorkMailImapEmailSource(EmailSource):
 
     def _connect(self) -> imaplib.IMAP4_SSL:
         if self._conn is None:
-            self._conn = imaplib.IMAP4_SSL(WORKMAIL_IMAP_HOST, WORKMAIL_IMAP_PORT)
-            self._conn.login(self.cfg.email, self.cfg.password)
+            self._conn = imaplib.IMAP4_SSL(
+                self.cfg.host,
+                self.cfg.port,
+                ssl_context=ssl.create_default_context(),
+                timeout=self.cfg.timeout_seconds,
+            )
+            try:
+                self._conn.login(self.cfg.email, self.cfg.password)
+            except Exception:
+                self.disconnect()
+                raise
         return self._conn
 
     def disconnect(self) -> None:
